@@ -49,6 +49,15 @@ def test_memory_dir_path_becomes_a_placeholder():
     assert "memory/" not in text
 
 
+def test_dash_encoded_home_is_replaced_outside_a_memory_path():
+    """The scratchpad section spells the home dir dash-encoded, and it is not a
+    `/memory/` path, so the memory-dir rule never reaches it."""
+    encoded = str(Path.home()).lstrip("/").replace("/", "-")
+    text = normalize(f"Scratchpad Directory: /mnt/scratch/tmp/-{encoded}-repos-py-thing\n")
+    assert encoded not in text
+    assert "<home>" in text
+
+
 def test_bare_account_name_is_replaced():
     """A username with no path around it: every path-shaped rule misses it."""
     # derived, never spelled out. a hardcoded username would defeat the
