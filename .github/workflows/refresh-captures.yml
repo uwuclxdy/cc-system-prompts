@@ -1,0 +1,58 @@
+name: refresh captures
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install Claude Code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Record the CC version under test
+        run: |
+          # A capture diff can move because the runner picked up a new CC, not
+          # because the prompt changed. The provenance header records which.
+          "$HOME/.local/bin/claude" --version | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Refresh captures
+        run: ./scripts/refresh-captures.sh
+
+      - name: Detect drift
+        id: drift
+        run: |
+          if git diff --quiet -- captures/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR on drift
+        if: steps.drift.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          branch: chore/refresh-captures
+          add-paths: |
+            captures/**
+            archive/**
+          delete-branch: true
+          title: 'docs(captures): upstream system prompts drifted'
+          body: |
+            The daily capture run saw a different system prompt than the one in
+            `captures/`. Read the diff against `archive/` to tell an upstream
+            prompt change apart from a CC version bump.
