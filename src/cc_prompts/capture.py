@@ -33,6 +33,14 @@ MODELS: dict[str, str] = {
 }
 
 DEFAULT_BIN = os.path.expanduser("~/.local/bin/claude")
+# where the custom prompt lives: the path the shim hardcodes, then this checkout
+CUSTOM_PROMPT_PATHS = (
+    Path(os.path.expanduser("~/.claude/system-prompt/cc-sys.md")),
+    Path(__file__).resolve().parents[2] / "cc-sys.md",
+)
+# calibrated against the 10 committed captures plus one deliberate shim'd capture:
+# zero stock false positives at 40 chars and above, 50 of 52 markers hit the shim'd one
+MIN_CUSTOM_MARKER = 60
 ATTEMPT_TIMEOUT = 90
 BOOT_WAIT = 4.0
 INPUT_WAIT = 1.0
@@ -55,6 +63,35 @@ def validate_identity(system: str, mode: str) -> None:
         raise RuntimeError(
             f"capture lacks the {mode} identity line; the spawn was probably the other flavor"
         )
+
+
+def custom_prompt_text(paths: tuple[Path, ...] = CUSTOM_PROMPT_PATHS) -> str:
+    """Read the custom prompt from the first candidate that resolves, or return empty."""
+    for path in paths:
+        try:
+            return path.read_text()
+        except OSError:
+            continue
+    return ""
+
+
+def validate_stock(system: str, custom: str) -> None:
+    """Guard the artifact of record: a capture must carry the STOCK prompt.
+
+    `--system-prompt-file` replaces the whole stock prose and leaves the identity
+    line standing, so `validate_identity` passes a shim'd capture unchanged. The
+    custom prompt is identity-bearing and `captures/` gets pushed, so match on
+    content: a renamed shim, or a `--claude-bin` pointing anywhere else, still
+    spells its own bytes into the capture. Inert when `custom` is empty, which is
+    the CI case, where no shim exists to guard against.
+    """
+    for line in custom.splitlines():
+        marker = line.strip()
+        if len(marker) >= MIN_CUSTOM_MARKER and marker in system:
+            raise RuntimeError(
+                f"capture carries the custom prompt ({marker[:50]!r}); "
+                "drive the real launcher, not the shim"
+            )
 
 
 def claude_version(binary: str) -> str:
@@ -213,6 +250,7 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
             raise RuntimeError(f"no request with a system reached the recorder for {model_id}")
         system = extract_system(body)
         validate_identity(system, mode)
+        validate_stock(system, custom_prompt_text())
         return system
     finally:
         stop_recorder(server)

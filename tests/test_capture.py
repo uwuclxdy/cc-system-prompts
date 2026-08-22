@@ -4,11 +4,15 @@ from cc_prompts.capture import (
     CLI_IDENTITY,
     SDK_IDENTITY,
     _system_size,
+    custom_prompt_text,
     extract_system,
     pick_request,
     validate_identity,
+    validate_stock,
     write_capture,
 )
+
+CUSTOM_LINE = "an option's text names the action you will take, not just the situation."
 
 
 def test_validate_identity_cli_accepts_the_cli_flavor():
@@ -32,6 +36,67 @@ def test_validate_identity_sdk_accepts_the_sdk_flavor():
 def test_validate_identity_sdk_rejects_the_cli_flavor():
     with pytest.raises(RuntimeError, match="sdk identity"):
         validate_identity(f"{CLI_IDENTITY}.", "sdk")
+
+
+def test_validate_stock_rejects_a_capture_carrying_the_custom_prompt():
+    # `--system-prompt-file` keeps the identity line, so validate_identity passes a
+    # shim'd capture; only the body separates the two
+    with pytest.raises(RuntimeError, match="custom prompt"):
+        validate_stock(f"{CLI_IDENTITY}.\n{CUSTOM_LINE}\n", CUSTOM_LINE)
+
+
+def test_validate_stock_accepts_a_stock_capture():
+    validate_stock(f"{CLI_IDENTITY}.\n# Environment\nplatform: linux\n", CUSTOM_LINE)
+
+
+def test_validate_stock_ignores_short_custom_lines():
+    # cc-sys.md shares headings and one-word lines with the stock prompt; a marker
+    # has to be long enough that only the custom prompt spells it
+    validate_stock("# Harness\nmarkdown\n", "# Harness\nmarkdown\n")
+
+
+def test_validate_stock_is_a_noop_when_the_custom_prompt_is_unreadable():
+    validate_stock(f"{CLI_IDENTITY}.\n{CUSTOM_LINE}\n", "")
+
+
+def test_custom_prompt_text_returns_empty_when_no_candidate_exists(tmp_path):
+    assert custom_prompt_text((tmp_path / "absent.md",)) == ""
+
+
+def test_custom_prompt_text_reads_the_first_readable_candidate(tmp_path):
+    second = tmp_path / "second.md"
+    second.write_text("body")
+    assert custom_prompt_text((tmp_path / "absent.md", second)) == "body"
+
+
+def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
+    # pins the wiring, not just the guard: capture_model is where a shim'd body
+    # would otherwise reach write_capture and land in `captures/`
+    from cc_prompts import capture as capture_mod
+
+    shimd = f"{SDK_IDENTITY}.\n{CUSTOM_LINE}\n" + "x" * 5000
+
+    def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": shimd}]})
+
+    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
+    with pytest.raises(RuntimeError, match="custom prompt"):
+        capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk")
+
+
+def test_capture_model_returns_a_stock_capture(monkeypatch):
+    # the control: same call path, same scope, a body the guard must NOT refuse
+    from cc_prompts import capture as capture_mod
+
+    stock = f"{SDK_IDENTITY}.\n# Environment\nplatform: linux\n" + "x" * 5000
+
+    def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": stock}]})
+
+    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
+    assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk") == stock
 
 
 def test_write_capture_names_sdk_files_with_the_suffix(tmp_path):
