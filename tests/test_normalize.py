@@ -10,6 +10,7 @@ def build_sample() -> str:
         "You have a persistent file-based memory at "
         f"`/mnt/scratch/tmp/tmp6jpvfo1i/projects/-{encoded_home}-repos-py-cc-system-prompts/memory/`."
     )
+    tokens_line = "<total_tokens>15000000 tokens left</total_tokens>"
     return f"""You are an interactive agent.
  - Primary working directory: {home}/repos/py/cc-system-prompts
  - Is a git repository: true
@@ -20,6 +21,7 @@ Today's date is 2026-08-22.
 see session 9a3f8c2e-1b4d-4c5a-9e2f-7d6b1a8c0e3d for context
 stray note lives at {home}/notes/ops.md
 {memory_line}
+{tokens_line}
 """
 
 
@@ -59,3 +61,9 @@ def test_dates_and_session_ids_become_placeholders():
 def test_prompt_body_content_is_untouched():
     text = normalize(build_sample())
     assert "You are an interactive agent." in text
+
+
+def test_quota_tokens_become_a_placeholder():
+    text = normalize(build_sample())
+    assert "15000000" not in text
+    assert "<total_tokens><tokens-left> tokens left</total_tokens>" in text

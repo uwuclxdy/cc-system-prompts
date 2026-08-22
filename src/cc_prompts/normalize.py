@@ -18,6 +18,11 @@ _LINE_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(Assistant knowledge cutoff is ).+?(\.)"), r"\1<cutoff>\2"),
     # memory dir path embeds a per-run scratch id and the dash-encoded cwd
     (re.compile(r"`[^`]*/memory/`"), "`<memory-dir>`"),
+    # quota state rides in the prompt; it varies with account usage
+    (
+        re.compile(r"<total_tokens>[\d,]+ tokens left</total_tokens>"),
+        "<total_tokens><tokens-left> tokens left</total_tokens>",
+    ),
 ]
 
 _UUID = re.compile(

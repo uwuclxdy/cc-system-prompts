@@ -1,17 +1,26 @@
-"""Capture per-model stock system prompts through a local HTTP recorder."""
+"""Capture per-model stock system prompts through a local HTTP recorder.
+
+The spawn must be interactive (pty): `claude -p` marks the session
+non-interactive, and the CLI then identifies as an Agent SDK agent instead of
+Claude Code (bundle 2.1.239, fn dii: isNonInteractive -> SDK identity).
+"""
 
 import argparse
 import contextlib
+import json
 import os
+import pty
 import re
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import date
 from pathlib import Path
 
 from .normalize import normalize
-from .recorder import start_recorder, stop_recorder
+from .recorder import RecorderServer, start_recorder, stop_recorder
 
 MODELS: dict[str, str] = {
     "opus": "claude-opus-5",
@@ -23,6 +32,10 @@ MODELS: dict[str, str] = {
 
 DEFAULT_BIN = os.path.expanduser("~/.local/bin/claude")
 ATTEMPT_TIMEOUT = 90
+BOOT_WAIT = 4.0
+INPUT_WAIT = 1.0
+# conversation prompts run ~20k+ chars; startup helpers stay far below
+MIN_SYSTEM_SIZE = 1000
 
 
 def claude_version(binary: str) -> str:
@@ -35,48 +48,23 @@ def claude_version(binary: str) -> str:
     return match.group(0)
 
 
-def _run_once(binary: str, model_id: str, config_dir: str, base_url: str, use_flag: bool) -> None:
-    env = os.environ | {
-        "CLAUDE_CONFIG_DIR": config_dir,
-        "ANTHROPIC_BASE_URL": base_url,
-        "ANTHROPIC_API_KEY": "dummy",
-        "ANTHROPIC_AUTH_TOKEN": "dummy",
-    }
-    cmd = [binary, "-p", "hi"]
-    if use_flag:
-        # ambient ANTHROPIC_MODEL leaks in from the parent and fires a stray
-        # request for a different model; drop it so the capture set is deterministic
-        env.pop("ANTHROPIC_MODEL", None)
-        cmd += ["--model", model_id]
-    else:
-        # --model rejected client-side: the env var is the fallback transport
-        env |= {"ANTHROPIC_MODEL": model_id}
-    # a timeout may still have landed the request; the recorder decides success
-    with contextlib.suppress(subprocess.TimeoutExpired):
-        subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=ATTEMPT_TIMEOUT,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
+def _system_size(body: dict) -> int:
+    system = body.get("system")
+    if isinstance(system, str):
+        return len(system)
+    if isinstance(system, list):
+        return sum(len(block.get("text", "")) for block in system)
+    return 0
 
 
 def pick_request(requests: list[dict]) -> dict | None:
-    """First request carrying a non-empty system.
+    """Request carrying the largest system prompt.
 
-    The CLI fires count_tokens (and possibly quota probes) before the real
-    messages call; those carry no system and must not win the capture.
+    count_tokens and quota probes carry none; interactive startup may fire
+    small helper prompts. the conversation prompt dwarfs both.
     """
-    for body in requests:
-        system = body.get("system")
-        if isinstance(system, str) and system:
-            return body
-        if isinstance(system, list) and system:
-            return body
-    return None
+    candidates = [body for body in requests if _system_size(body) > 0]
+    return max(candidates, key=_system_size, default=None)
 
 
 def extract_system(body: dict) -> str:
@@ -86,15 +74,91 @@ def extract_system(body: dict) -> str:
     return "\n".join(block.get("text", "") for block in system)
 
 
+def _spawn_env(config_dir: str, base_url: str, model_id: str, use_flag: bool) -> dict[str, str]:
+    # ambient CLAUDE_*/ANTHROPIC_* from the parent leaks into the child and
+    # fires stray requests for other models; scrub them all and set our own
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CLAUDE_", "ANTHROPIC_"))
+    } | {
+        "CLAUDE_CONFIG_DIR": config_dir,
+        "ANTHROPIC_BASE_URL": base_url,
+        "ANTHROPIC_API_KEY": "dummy",
+        "ANTHROPIC_AUTH_TOKEN": "dummy",
+        "TERM": "xterm-256color",
+    }
+    if use_flag:
+        env.pop("ANTHROPIC_MODEL", None)
+    else:
+        # --model rejected client-side: the env var is the fallback transport
+        env |= {"ANTHROPIC_MODEL": model_id}
+    return env
+
+
+def _run_interactive(
+    binary: str,
+    model_id: str,
+    config_dir: str,
+    workdir: str,
+    base_url: str,
+    use_flag: bool,
+    server: RecorderServer,
+) -> None:
+    env = _spawn_env(config_dir, base_url, model_id, use_flag)
+    args = [binary]
+    if use_flag:
+        args += ["--model", model_id]
+
+    pid, fd = pty.fork()
+    if pid == 0:
+        try:
+            os.chdir(workdir)
+            os.environ.clear()
+            os.environ.update(env)
+            os.execv(args[0], args)
+        except OSError:
+            os._exit(127)
+    try:
+        time.sleep(BOOT_WAIT)
+        with contextlib.suppress(OSError):
+            # the TUI asks whether to use the dummy env api key; Enter accepts
+            os.write(fd, b"\r")
+            time.sleep(INPUT_WAIT)
+            os.write(fd, b"hi\r")
+        deadline = time.monotonic() + ATTEMPT_TIMEOUT
+        while time.monotonic() < deadline:
+            if any(_system_size(body) > MIN_SYSTEM_SIZE for body in server.requests):
+                break
+            time.sleep(0.25)
+    finally:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(10):
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                break
+            time.sleep(0.2)
+        else:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        os.close(fd)
+
+
 def capture_model(binary: str, model_id: str) -> str:
     server, port = start_recorder()
     base_url = f"http://127.0.0.1:{port}"
     try:
-        with tempfile.TemporaryDirectory() as config_dir:
-            Path(config_dir, ".claude.json").write_text('{"hasCompletedOnboarding": true}')
+        with tempfile.TemporaryDirectory() as workdir, tempfile.TemporaryDirectory() as config_dir:
+            Path(config_dir, ".claude.json").write_text(
+                json.dumps(
+                    {
+                        "hasCompletedOnboarding": True,
+                        "projects": {workdir: {"hasTrustDialogAccepted": True}},
+                    }
+                )
+            )
             for use_flag in (True, False):
-                _run_once(binary, model_id, config_dir, base_url, use_flag)
-                if server.requests:
+                _run_interactive(binary, model_id, config_dir, workdir, base_url, use_flag, server)
+                if pick_request(server.requests) is not None:
                     break
         body = pick_request(server.requests)
         if body is None:
