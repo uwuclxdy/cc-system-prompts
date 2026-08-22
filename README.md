@@ -21,7 +21,9 @@ No upstream API is involved. A stdlib HTTP server binds a loopback port, the CLI
 
 Each spawn gets a fresh config dir seeded with onboarding plus folder trust, and a temporary working directory, so no project's files or history are loaded as context. That is not the same as a context-free prompt: the temp dir follows `TMPDIR`, and if that path happens to sit inside a git checkout, Claude Code walks up, finds it, and stamps a `gitStatus:` block into the prompt.
 
-So normalization, not isolation, is what makes a capture publishable. Before writing, the tool replaces everything machine-specific: dates, working directory, OS version, model line, knowledge cutoff, session ids, remaining-token lines, memory paths, and the whole `gitStatus:` body (branch names, git identity, working-tree paths, commit subjects). The block's labels survive, because their wording is upstream prompt text and a change to it is exactly what this repo tracks. No home path survives in either spelling.
+So normalization, not isolation, is what makes a capture publishable. Before writing, the tool replaces everything machine-specific: dates, working directory, OS version, model line, knowledge cutoff, session ids, remaining-token lines, memory paths, and the whole `gitStatus:` body (branch names, git identity, working-tree paths, commit subjects). The block's labels survive, because their wording is upstream prompt text and a change to it is exactly what this repo tracks.
+
+No home path survives, in either the slash-separated or the dash-encoded spelling. A bare account name is caught separately, since it arrives with no path around it for a path-shaped rule to match.
 
 Every capture carries a provenance header naming the observation date, the Claude Code version, and the model id.
 
