@@ -1,8 +1,10 @@
 """Capture per-model stock system prompts through a local HTTP recorder.
 
-The spawn must be interactive (pty): `claude -p` marks the session
-non-interactive, and the CLI then identifies as an Agent SDK agent instead of
-Claude Code (bundle 2.1.239, fn dii: isNonInteractive -> SDK identity).
+Two flavors exist, selected client-side by spawn shape (bundle 2.1.239, fn
+dii): an interactive (pty) session identifies as Claude Code the CLI; a
+non-interactive `claude -p` run identifies as a Claude Agent SDK agent. the
+tool captures both, the cli flavor as `<name>.md`, the sdk flavor as
+`<name>-sdk.md`.
 """
 
 import argparse
@@ -37,18 +39,21 @@ INPUT_WAIT = 1.0
 # conversation prompts run ~20k+ chars; startup helpers stay far below
 MIN_SYSTEM_SIZE = 1000
 CLI_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude"
+SDK_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK"
+
+MODE_IDENTITY = {"cli": CLI_IDENTITY, "sdk": SDK_IDENTITY}
 
 
-def validate_cli_identity(system: str) -> None:
-    """Guard the artifact of record: the stock CLI prompt.
+def validate_identity(system: str, mode: str) -> None:
+    """Guard the artifact of record: the prompt flavor the mode asks for.
 
-    A non-interactive spawn (claude -p) silently produces the Agent SDK
-    flavor instead; upstream could also flip the identity line. fail fast
-    rather than publish the wrong prompt.
+    The spawn shape decides the identity line (interactive -> cli, `-p` ->
+    sdk); a capture carrying the other flavor means the runner and the wire
+    disagree. fail fast rather than publish the wrong prompt.
     """
-    if CLI_IDENTITY not in system:
+    if MODE_IDENTITY[mode] not in system:
         raise RuntimeError(
-            "capture lacks the CLI identity line; the spawn was probably non-interactive"
+            f"capture lacks the {mode} identity line; the spawn was probably the other flavor"
         )
 
 
@@ -157,7 +162,35 @@ def _run_interactive(
         os.close(fd)
 
 
-def capture_model(binary: str, model_id: str) -> str:
+def _run_sdk(
+    binary: str,
+    model_id: str,
+    config_dir: str,
+    workdir: str,
+    base_url: str,
+    use_flag: bool,
+    server: RecorderServer,
+) -> None:
+    del server  # the subprocess exits on its own; the recorder keeps the body
+    env = _spawn_env(config_dir, base_url, model_id, use_flag)
+    cmd = [binary, "-p", "hi"]
+    if use_flag:
+        cmd += ["--model", model_id]
+    # a timeout may still have landed the request; the recorder decides success
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        subprocess.run(
+            cmd,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=ATTEMPT_TIMEOUT,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            cwd=workdir,  # keep the parent repo's live context out of the prompt
+        )
+
+
+def capture_model(binary: str, model_id: str, mode: str) -> str:
     server, port = start_recorder()
     base_url = f"http://127.0.0.1:{port}"
     try:
@@ -170,24 +203,28 @@ def capture_model(binary: str, model_id: str) -> str:
                     }
                 )
             )
+            runner = _run_interactive if mode == "cli" else _run_sdk
             for use_flag in (True, False):
-                _run_interactive(binary, model_id, config_dir, workdir, base_url, use_flag, server)
+                runner(binary, model_id, config_dir, workdir, base_url, use_flag, server)
                 if pick_request(server.requests) is not None:
                     break
         body = pick_request(server.requests)
         if body is None:
             raise RuntimeError(f"no request with a system reached the recorder for {model_id}")
         system = extract_system(body)
-        validate_cli_identity(system)
+        validate_identity(system, mode)
         return system
     finally:
         stop_recorder(server)
 
 
-def write_capture(out_dir: Path, name: str, model_id: str, version: str, text: str) -> Path:
+def write_capture(
+    out_dir: Path, name: str, model_id: str, version: str, text: str, mode: str
+) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     header = f"observed {date.today().isoformat()} (wire capture, CC {version}, {model_id})\n\n"
-    target = out_dir / f"{name}.md"
+    suffix = "-sdk" if mode == "sdk" else ""
+    target = out_dir / f"{name}{suffix}.md"
     target.write_text(header + normalize(text) + "\n")
     return target
 
@@ -195,6 +232,12 @@ def write_capture(out_dir: Path, name: str, model_id: str, version: str, text: s
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="*", default=list(MODELS), help="subset of model names")
+    parser.add_argument(
+        "--mode",
+        choices=("both", "cli", "sdk"),
+        default="both",
+        help="capture flavor; both writes `<name>.md` and `<name>-sdk.md`",
+    )
     parser.add_argument("--out", type=Path, default=Path("captures"), help="output directory")
     parser.add_argument("--claude-bin", default=DEFAULT_BIN, help="claude launcher path")
     args = parser.parse_args(argv)
@@ -203,18 +246,20 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         parser.error(f"unknown models: {', '.join(unknown)}")
 
+    modes = ("cli", "sdk") if args.mode == "both" else (args.mode,)
     version = claude_version(args.claude_bin)
     failures: list[str] = []
     for name in args.models:
         model_id = MODELS[name]
-        try:
-            text = capture_model(args.claude_bin, model_id)
-        except RuntimeError as err:
-            print(f"FAIL {name}: {err}", file=sys.stderr)
-            failures.append(name)
-            continue
-        target = write_capture(args.out, name, model_id, version, text)
-        print(f"ok {name} -> {target}")
+        for mode in modes:
+            try:
+                text = capture_model(args.claude_bin, model_id, mode)
+            except RuntimeError as err:
+                print(f"FAIL {mode} {name}: {err}", file=sys.stderr)
+                failures.append(f"{mode} {name}")
+                continue
+            target = write_capture(args.out, name, model_id, version, text, mode)
+            print(f"ok {mode} {name} -> {target}")
     return 1 if failures else 0
 
 
