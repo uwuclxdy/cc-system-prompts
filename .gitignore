@@ -1,2 +1,5 @@
 cc-sys.md
 raw/
+.venv/
+__pycache__/
+*.egg-info/
