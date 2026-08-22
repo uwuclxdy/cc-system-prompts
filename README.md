@@ -45,7 +45,7 @@ uv run cc-prompts-capture --models opus --mode cli
 ./scripts/refresh-captures.sh              # capture, then archive on drift
 ```
 
-The capture must run against the real `claude` launcher. Pointing it at a wrapper that injects `--system-prompt-file` records that custom prompt instead of the stock one, and the script refuses a path under a `shims` directory for that reason.
+The capture must run against the real `claude` launcher. Pointing it at a wrapper that injects `--system-prompt-file` would record that custom prompt instead of the stock one, so the capture is refused when its text matches the custom prompt's. `refresh-captures.sh` rejects a launcher path under a `shims` directory before any capture runs.
 
 ## Caveats
 
