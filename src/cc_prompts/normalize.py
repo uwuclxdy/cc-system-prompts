@@ -53,7 +53,11 @@ def normalize(text: str) -> str:
     text = _UUID.sub("<session-id>", text)
     text = _ISO_DATE.sub("<date>", text)
     # belt and braces: no home path survives, including ones no line rule matched
-    text = text.replace(os.path.expanduser("~"), "<home>")
+    home = os.path.expanduser("~")
+    text = text.replace(home, "<home>")
     # some paths spell the home dir dash-encoded (scratch memory dirs)
-    encoded_home = os.path.expanduser("~").lstrip("/").replace("/", "-")
-    return text.replace(encoded_home, "<home>")
+    text = text.replace(home.lstrip("/").replace("/", "-"), "<home>")
+    # last: a bare account name reaches the prompt with no path around it, which
+    # every path-shaped rule above misses. `Git user:` was one such field.
+    # runs after the path rules so those still see an intact home path.
+    return text.replace(os.path.basename(home), "<user>")

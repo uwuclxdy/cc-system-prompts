@@ -46,8 +46,17 @@ def test_memory_dir_path_becomes_a_placeholder():
     text = normalize(build_sample())
     assert "`<memory-dir>`" in text
     assert "tmp6jpvfo1i" not in text
-    assert "uwuclxdy" not in text
     assert "memory/" not in text
+
+
+def test_bare_account_name_is_replaced():
+    """A username with no path around it: every path-shaped rule misses it."""
+    # derived, never spelled out. a hardcoded username would defeat the
+    # assertion by putting the thing under test back into a published file.
+    user = Path.home().name
+    text = normalize(f"a bare mention of {user} in ordinary prose\n")
+    assert user not in text
+    assert "a bare mention of <user> in ordinary prose" in text
 
 
 def test_dates_and_session_ids_become_placeholders():
