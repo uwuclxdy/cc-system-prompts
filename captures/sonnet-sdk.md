@@ -226,14 +226,13 @@ When the conversation grows long, some or all of the current context is summariz
 
 gitStatus: This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.
 
-Current branch: mommy
+Current branch: <branch>
 
-Main branch (you will usually use this for PRs): main
+Main branch (you will usually use this for PRs): <main-branch>
 
-Git user: cloudy
+Git user: <git-user>
 
 Status:
-(clean)
-
+<git-status>
 Recent commits:
-
+<recent-commits>

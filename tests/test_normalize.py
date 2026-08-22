@@ -67,3 +67,50 @@ def test_quota_tokens_become_a_placeholder():
     text = normalize(build_sample())
     assert "15000000" not in text
     assert "<total_tokens><tokens-left> tokens left</total_tokens>" in text
+
+
+def build_git_status_sample() -> str:
+    return """gitStatus: This is the git status at the start of the conversation.
+
+Current branch: some-private-branch
+
+Main branch (you will usually use this for PRs): trunk
+
+Git user: a-real-person
+
+Status:
+M src/secret_project/thing.py
+?? notes-about-a-client.md
+
+Recent commits:
+deadbee fix(auth): patch the customer login bug
+cafef00 feat(billing): add the unreleased pricing tier
+"""
+
+
+def test_git_status_block_keeps_its_labels():
+    text = normalize(build_git_status_sample())
+    assert "gitStatus: This is the git status at the start of the conversation." in text
+    assert "Current branch: <branch>" in text
+    assert "Main branch (you will usually use this for PRs): <main-branch>" in text
+    assert "Git user: <git-user>" in text
+
+
+def test_git_status_block_leaks_no_per_run_values():
+    text = normalize(build_git_status_sample())
+    for leaked in (
+        "some-private-branch",
+        "trunk",
+        "a-real-person",
+        "secret_project",
+        "notes-about-a-client",
+        "deadbee",
+        "customer login",
+        "unreleased pricing",
+    ):
+        assert leaked not in text, f"{leaked!r} survived normalization"
+
+
+def test_normalize_is_idempotent():
+    once = normalize(build_git_status_sample())
+    assert normalize(once) == once

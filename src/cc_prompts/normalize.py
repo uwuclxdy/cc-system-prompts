@@ -23,7 +23,21 @@ _LINE_RULES: list[tuple[re.Pattern[str], str]] = [
         re.compile(r"<total_tokens>[\d,]+ tokens left</total_tokens>"),
         "<total_tokens><tokens-left> tokens left</total_tokens>",
     ),
+    # the gitStatus block names whatever repo the capture's workdir resolved to.
+    # captures get published, so branch names, the git identity, working-tree
+    # paths and commit subjects all have to go. the labels stay: their wording
+    # is upstream prompt text and a change to it is what this repo tracks.
+    (re.compile(r"(Current branch: ).+"), r"\1<branch>"),
+    (
+        re.compile(r"(Main branch \(you will usually use this for PRs\): ).+"),
+        r"\1<main-branch>",
+    ),
+    (re.compile(r"(Git user: ).+"), r"\1<git-user>"),
 ]
+
+# Bodies rather than single lines, so they need the whole remaining block.
+_GIT_STATUS_BODY = re.compile(r"(\nStatus:\n)(?:(?!\nRecent commits:)[\s\S])*")
+_GIT_COMMITS_BODY = re.compile(r"(\nRecent commits:\n?)[\s\S]*")
 
 _UUID = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
@@ -34,6 +48,8 @@ _ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 def normalize(text: str) -> str:
     for pattern, repl in _LINE_RULES:
         text = pattern.sub(repl, text)
+    text = _GIT_STATUS_BODY.sub(r"\1<git-status>", text)
+    text = _GIT_COMMITS_BODY.sub(r"\1<recent-commits>", text)
     text = _UUID.sub("<session-id>", text)
     text = _ISO_DATE.sub("<date>", text)
     # belt and braces: no home path survives, including ones no line rule matched
