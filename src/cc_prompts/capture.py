@@ -36,6 +36,20 @@ BOOT_WAIT = 4.0
 INPUT_WAIT = 1.0
 # conversation prompts run ~20k+ chars; startup helpers stay far below
 MIN_SYSTEM_SIZE = 1000
+CLI_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude"
+
+
+def validate_cli_identity(system: str) -> None:
+    """Guard the artifact of record: the stock CLI prompt.
+
+    A non-interactive spawn (claude -p) silently produces the Agent SDK
+    flavor instead; upstream could also flip the identity line. fail fast
+    rather than publish the wrong prompt.
+    """
+    if CLI_IDENTITY not in system:
+        raise RuntimeError(
+            "capture lacks the CLI identity line; the spawn was probably non-interactive"
+        )
 
 
 def claude_version(binary: str) -> str:
@@ -163,7 +177,9 @@ def capture_model(binary: str, model_id: str) -> str:
         body = pick_request(server.requests)
         if body is None:
             raise RuntimeError(f"no request with a system reached the recorder for {model_id}")
-        return extract_system(body)
+        system = extract_system(body)
+        validate_cli_identity(system)
+        return system
     finally:
         stop_recorder(server)
 

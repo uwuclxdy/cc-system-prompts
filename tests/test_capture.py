@@ -1,4 +1,26 @@
-from cc_prompts.capture import _system_size, extract_system, pick_request
+import pytest
+
+from cc_prompts.capture import (
+    CLI_IDENTITY,
+    _system_size,
+    extract_system,
+    pick_request,
+    validate_cli_identity,
+)
+
+
+def test_validate_cli_identity_accepts_the_cli_flavor():
+    validate_cli_identity(f"preamble\n{CLI_IDENTITY}. More text.")
+
+
+def test_validate_cli_identity_rejects_the_sdk_flavor():
+    with pytest.raises(RuntimeError, match="CLI identity"):
+        validate_cli_identity("You are a Claude agent, built on Anthropic's Claude Agent SDK.")
+
+
+def test_validate_cli_identity_rejects_text_with_no_identity_at_all():
+    with pytest.raises(RuntimeError, match="CLI identity"):
+        validate_cli_identity("You are an interactive agent that helps with tasks.")
 
 
 def helper_body() -> dict:
