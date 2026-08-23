@@ -65,6 +65,30 @@ def validate_identity(system: str, mode: str) -> None:
         )
 
 
+def seed_repo(workdir: str) -> None:
+    """Make the capture's working directory a git repository of its own.
+
+    claude stamps a `gitStatus:` block only from inside a repo, and whether the
+    temp workdir lands in one is a property of `TMPDIR`: `/mnt/scratch/tmp` sits
+    under a checkout, a CI runner's does not. That turned the whole block into
+    drift at every machine boundary, which would flap forever between a local
+    refresh and the daily one. Owning the repo fixes the block in place; its
+    values are normalized away regardless, and an empty repo is enough
+    (MEASURED 2026-08-23, `git init` in a repo-free dir under /var/tmp).
+    """
+    subprocess.run(["git", "init", "-q", workdir], check=True, capture_output=True)
+
+
+def validate_gitstatus(system: str) -> None:
+    """Guard the artifact of record: the `gitStatus:` block `seed_repo` buys.
+
+    A missing block means the seed did not take, and the capture is then not
+    comparable with one from any other machine.
+    """
+    if "gitStatus:" not in system:
+        raise RuntimeError("capture carries no gitStatus block; the workdir seed did not take")
+
+
 def custom_prompt_text(paths: tuple[Path, ...] = CUSTOM_PROMPT_PATHS) -> str:
     """Read the custom prompt from the first candidate that resolves, or return empty."""
     for path in paths:
@@ -240,6 +264,7 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
                     }
                 )
             )
+            seed_repo(workdir)
             runner = _run_interactive if mode == "cli" else _run_sdk
             for use_flag in (True, False):
                 runner(binary, model_id, config_dir, workdir, base_url, use_flag, server)
@@ -251,6 +276,7 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
         system = extract_system(body)
         validate_identity(system, mode)
         validate_stock(system, custom_prompt_text())
+        validate_gitstatus(system)
         return system
     finally:
         stop_recorder(server)

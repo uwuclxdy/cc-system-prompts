@@ -7,6 +7,8 @@ from cc_prompts.capture import (
     custom_prompt_text,
     extract_system,
     pick_request,
+    seed_repo,
+    validate_gitstatus,
     validate_identity,
     validate_stock,
     write_capture,
@@ -69,12 +71,28 @@ def test_custom_prompt_text_reads_the_first_readable_candidate(tmp_path):
     assert custom_prompt_text((tmp_path / "absent.md", second)) == "body"
 
 
+def test_validate_gitstatus_accepts_a_capture_that_carries_the_block():
+    validate_gitstatus("preamble\ngitStatus: This is the git status at the start\n")
+
+
+def test_validate_gitstatus_rejects_a_capture_missing_the_block():
+    # whether the workdir lands in a repo is a property of TMPDIR, so a missing
+    # block means the seed did not take and the capture is not comparable
+    with pytest.raises(RuntimeError, match="gitStatus"):
+        validate_gitstatus("preamble\nno block here\n")
+
+
+def test_seed_repo_makes_the_workdir_its_own_repository(tmp_path):
+    seed_repo(str(tmp_path))
+    assert (tmp_path / ".git").is_dir()
+
+
 def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
     # pins the wiring, not just the guard: capture_model is where a shim'd body
     # would otherwise reach write_capture and land in `captures/`
     from cc_prompts import capture as capture_mod
 
-    shimd = f"{SDK_IDENTITY}.\n{CUSTOM_LINE}\n" + "x" * 5000
+    shimd = f"{SDK_IDENTITY}.\n{CUSTOM_LINE}\ngitStatus: snapshot\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": shimd}]})
@@ -89,7 +107,7 @@ def test_capture_model_returns_a_stock_capture(monkeypatch):
     # the control: same call path, same scope, a body the guard must NOT refuse
     from cc_prompts import capture as capture_mod
 
-    stock = f"{SDK_IDENTITY}.\n# Environment\nplatform: linux\n" + "x" * 5000
+    stock = f"{SDK_IDENTITY}.\n# Environment\ngitStatus: snapshot\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": stock}]})
@@ -97,6 +115,22 @@ def test_capture_model_returns_a_stock_capture(monkeypatch):
     monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
     monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
     assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk") == stock
+
+
+def test_capture_model_refuses_a_capture_with_no_gitstatus(monkeypatch):
+    # on this box TMPDIR sits under a checkout, so a dropped seed still yields a
+    # block and only a runner would notice; this pins the guard's own wiring
+    from cc_prompts import capture as capture_mod
+
+    unseeded = f"{SDK_IDENTITY}.\n# Environment\n" + "x" * 5000
+
+    def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": unseeded}]})
+
+    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
+    with pytest.raises(RuntimeError, match="gitStatus"):
+        capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk")
 
 
 def test_write_capture_names_sdk_files_with_the_suffix(tmp_path):
