@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable, Iterator
 from datetime import date
 from pathlib import Path
 
@@ -110,6 +111,15 @@ def custom_prompt_text(paths: tuple[Path, ...] = CUSTOM_PROMPT_PATHS) -> str:
     return ""
 
 
+def custom_markers(system: str, custom: str) -> list[str]:
+    """Lines of the custom prompt long enough that only it spells them, found in `system`."""
+    return [
+        marker
+        for line in custom.splitlines()
+        if len(marker := line.strip()) >= MIN_CUSTOM_MARKER and marker in system
+    ]
+
+
 def validate_stock(system: str, custom: str) -> None:
     """Guard the artifact of record: a capture must carry the STOCK prompt.
 
@@ -120,13 +130,12 @@ def validate_stock(system: str, custom: str) -> None:
     spells its own bytes into the capture. Inert when `custom` is empty, which is
     the CI case, where no shim exists to guard against.
     """
-    for line in custom.splitlines():
-        marker = line.strip()
-        if len(marker) >= MIN_CUSTOM_MARKER and marker in system:
-            raise RuntimeError(
-                f"capture carries the custom prompt ({marker[:50]!r}); "
-                "drive the real launcher, not the shim"
-            )
+    found = custom_markers(system, custom)
+    if found:
+        raise RuntimeError(
+            f"capture carries the custom prompt ({found[0][:50]!r}); "
+            "drive the real launcher, not the shim"
+        )
 
 
 def claude_version(binary: str) -> str:
@@ -187,6 +196,10 @@ def _spawn_env(config_dir: str, base_url: str, model_id: str, use_flag: bool) ->
     return env
 
 
+def has_conversation_request(server: RecorderServer) -> bool:
+    return any(_system_size(body) > MIN_SYSTEM_SIZE for body in server.requests)
+
+
 def _run_interactive(
     binary: str,
     model_id: str,
@@ -195,6 +208,8 @@ def _run_interactive(
     base_url: str,
     use_flag: bool,
     server: RecorderServer,
+    ready: Callable[[RecorderServer], bool] = has_conversation_request,
+    timeout: float = ATTEMPT_TIMEOUT,
 ) -> None:
     env = _spawn_env(config_dir, base_url, model_id, use_flag)
     args = [binary]
@@ -217,9 +232,9 @@ def _run_interactive(
             os.write(fd, b"\r")
             time.sleep(INPUT_WAIT)
             os.write(fd, b"hi\r")
-        deadline = time.monotonic() + ATTEMPT_TIMEOUT
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if any(_system_size(body) > MIN_SYSTEM_SIZE for body in server.requests):
+            if ready(server):
                 break
             time.sleep(0.25)
     finally:
@@ -242,8 +257,10 @@ def _run_sdk(
     base_url: str,
     use_flag: bool,
     server: RecorderServer,
+    ready: Callable[[RecorderServer], bool] = has_conversation_request,
+    timeout: float = ATTEMPT_TIMEOUT,
 ) -> None:
-    del server  # the subprocess exits on its own; the recorder keeps the body
+    del server, ready  # the subprocess exits on its own; the recorder keeps the body
     env = _spawn_env(config_dir, base_url, model_id, use_flag)
     cmd = [binary, "-p", "hi"]
     if use_flag:
@@ -255,28 +272,39 @@ def _run_sdk(
             env=env,
             capture_output=True,
             text=True,
-            timeout=ATTEMPT_TIMEOUT,
+            timeout=timeout,
             check=False,
             stdin=subprocess.DEVNULL,
             cwd=workdir,  # keep the parent repo's live context out of the prompt
         )
 
 
+@contextlib.contextmanager
+def capture_workspace() -> Iterator[tuple[str, str]]:
+    """A throwaway workdir + config dir, onboarded, trusted, and seeded as a repo."""
+    with tempfile.TemporaryDirectory() as workdir, tempfile.TemporaryDirectory() as config_dir:
+        Path(config_dir, ".claude.json").write_text(
+            json.dumps(
+                {
+                    "hasCompletedOnboarding": True,
+                    "projects": {workdir: {"hasTrustDialogAccepted": True}},
+                }
+            )
+        )
+        seed_repo(workdir)
+        yield workdir, config_dir
+
+
+def runner_for(mode: str) -> Callable[..., None]:
+    return _run_interactive if mode == "cli" else _run_sdk
+
+
 def capture_model(binary: str, model_id: str, mode: str) -> str:
     server, port = start_recorder()
     base_url = f"http://127.0.0.1:{port}"
     try:
-        with tempfile.TemporaryDirectory() as workdir, tempfile.TemporaryDirectory() as config_dir:
-            Path(config_dir, ".claude.json").write_text(
-                json.dumps(
-                    {
-                        "hasCompletedOnboarding": True,
-                        "projects": {workdir: {"hasTrustDialogAccepted": True}},
-                    }
-                )
-            )
-            seed_repo(workdir)
-            runner = _run_interactive if mode == "cli" else _run_sdk
+        with capture_workspace() as (workdir, config_dir):
+            runner = runner_for(mode)
             for use_flag in (True, False):
                 runner(binary, model_id, config_dir, workdir, base_url, use_flag, server)
                 if pick_request(server.requests) is not None:
@@ -293,11 +321,18 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
         stop_recorder(server)
 
 
+def capture_header(model_id: str, version: str, note: str = "") -> str:
+    detail = f", {note}" if note else ""
+    return (
+        f"observed {date.today().isoformat()} (wire capture, CC {version}, {model_id}{detail})\n\n"
+    )
+
+
 def write_capture(
     out_dir: Path, name: str, model_id: str, version: str, text: str, mode: str
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    header = f"observed {date.today().isoformat()} (wire capture, CC {version}, {model_id})\n\n"
+    header = capture_header(model_id, version)
     suffix = "-sdk" if mode == "sdk" else ""
     target = out_dir / f"{name}{suffix}.md"
     target.write_text(header + normalize(text) + "\n")

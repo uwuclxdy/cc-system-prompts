@@ -7,7 +7,8 @@ license         = { text = "MIT" }
 dependencies = []
 
 [project.scripts]
-cc-prompts-capture = "cc_prompts.capture:main"
+cc-prompts-capture  = "cc_prompts.capture:main"
+cc-prompts-subagent = "cc_prompts.subagent:main"
 
 [dependency-groups]
 dev = [

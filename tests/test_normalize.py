@@ -129,6 +129,31 @@ def test_git_status_block_leaks_no_per_run_values():
         assert leaked not in text, f"{leaked!r} survived normalization"
 
 
+def build_subagent_env_sample() -> str:
+    return """Here is useful information about the environment you are running in:
+<env>
+Working directory: /mnt/scratch/tmp/tmp10hx7m5c
+Is directory a git repo: Yes
+Platform: linux
+</env>
+"""
+
+
+def test_subagent_env_block_loses_its_per_run_values():
+    text = normalize(build_subagent_env_sample())
+    assert "Working directory: <cwd>" in text
+    assert "Is directory a git repo: <git-repo>" in text
+    assert "tmp10hx7m5c" not in text
+    assert "Platform: linux" in text
+
+
+def test_the_env_cwd_rule_only_claims_a_line_it_starts():
+    """The label is a suffix of the main prompt's own `Primary working
+    directory:`, so the rule rewrites a line it begins and no other."""
+    text = normalize("prose mentioning Working directory: /tmp/x in passing\n")
+    assert text == "prose mentioning Working directory: /tmp/x in passing\n"
+
+
 def test_normalize_is_idempotent():
     once = normalize(build_git_status_sample())
     assert normalize(once) == once

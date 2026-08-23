@@ -24,6 +24,41 @@ def test_recorder_dumps_body_and_answers_400():
         stop_recorder(server)
 
 
+def test_recorder_streams_what_the_responder_hands_back():
+    server, port = start_recorder(lambda body: f"event: ok\ndata: {body['model']}\n\n")
+    try:
+        body = json.dumps({"model": "x", "system": [{"type": "text", "text": "sys"}]}).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/messages", data=body, method="POST"
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+            assert response.headers["Content-Type"] == "text/event-stream"
+            assert response.read() == b"event: ok\ndata: x\n\n"
+        # the recorder is still the artifact of record, answered or rejected
+        assert server.requests[0]["model"] == "x"
+    finally:
+        stop_recorder(server)
+
+
+def test_recorder_rejects_what_the_responder_declines():
+    server, port = start_recorder(lambda body: None)
+    try:
+        body = json.dumps({"model": "x"}).encode()
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/messages", data=body, method="POST"
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as err:
+            assert err.code == 400
+        else:
+            raise AssertionError("expected HTTP 400")
+        assert server.requests[0]["model"] == "x"
+    finally:
+        stop_recorder(server)
+
+
 def test_recorder_counts_undecodable_bodies():
     server, port = start_recorder()
     try:

@@ -23,6 +23,14 @@ esac
 
 uv run cc-prompts-capture --claude-bin "$claude_bin" --out captures
 
+# The subagent prompt is a separate artifact: it reaches the wire only when
+# something spawns a subagent, so it needs its own probe. One file covers every
+# claude model (all four normalize identical); deepseek gets its own, since a
+# non-claude model is told its name differently and gets no cutoff line.
+uv run cc-prompts-subagent --claude-bin "$claude_bin" --out captures/subagent.md
+uv run cc-prompts-subagent --claude-bin "$claude_bin" --model deepseek-chat \
+    --out captures/subagent-deepseek.md
+
 if git diff --quiet -- captures/; then
     printf 'refresh-captures: no drift\n'
     exit 0

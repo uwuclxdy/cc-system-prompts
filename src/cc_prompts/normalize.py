@@ -10,6 +10,10 @@ import re
 _LINE_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(Primary working directory: ).+"), r"\1<cwd>"),
     (re.compile(r"(Is a git repository: )(?:true|false)"), r"\1<git-repo>"),
+    # a subagent's <env> block asks the same two questions in its own words.
+    # anchored, since the cwd one is otherwise a suffix of the rule above it
+    (re.compile(r"^(Working directory: ).+", re.MULTILINE), r"\1<cwd>"),
+    (re.compile(r"^(Is directory a git repo: )(?:Yes|No)", re.MULTILINE), r"\1<git-repo>"),
     (re.compile(r"(OS Version: ).+"), r"\1<os-version>"),
     (
         re.compile(r"(You are powered by the model named ).+?(\. The exact model ID is ).+?(\.)"),
