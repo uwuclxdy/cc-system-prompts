@@ -9,6 +9,9 @@ dependencies = []
 [project.scripts]
 cc-prompts-capture  = "cc_prompts.capture:main"
 cc-prompts-subagent = "cc_prompts.subagent:main"
+cc-prompts-refresh  = "cc_prompts.refresh:main"
+cc-prompts-versions = "cc_prompts.versions:main"
+cc-prompts-install  = "cc_prompts.install:main"
 
 [dependency-groups]
 dev = [
