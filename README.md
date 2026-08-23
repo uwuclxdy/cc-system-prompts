@@ -35,6 +35,7 @@ Every capture carries a provenance header naming the observation date, the Claud
 | `captures/` | current normalized captures, one file per model per flavor |
 | `archive/<cc-version>/` | a snapshot of the whole set each time it changed |
 | `scripts/refresh-captures.sh` | re-capture and archive; the same script CI runs |
+| `shim/claude` | PATH wrapper that puts a custom system prompt in front of every spawn |
 
 ## Running it
 
@@ -46,6 +47,14 @@ uv run cc-prompts-capture --models opus --mode cli
 ```
 
 The capture must run against the real `claude` launcher. Pointing it at a wrapper that injects `--system-prompt-file` would record that custom prompt instead of the stock one, so the capture is refused when its text matches the custom prompt's. `refresh-captures.sh` rejects a launcher path under a `shims` directory before any capture runs.
+
+## The shim
+
+`shim/claude` is a PATH wrapper that hands the real launcher a `--system-prompt-file`. That flag replaces the entire stock system array rather than the prose around the harness blocks, so `# Environment` goes with everything else and a session is left knowing neither its working directory, its platform, nor its OS version. The shim rebuilds that block from what the machine can answer and appends it to the prompt it passes. The stock block's other lines are upstream prose: the knowledge cutoff, the model roster, the availability and fast-mode blurbs. Copying those would fork the text this repo exists to track, so they stay out, and the exact model id is written only when the caller spells `--model`, since Claude Code otherwise resolves it from the account.
+
+Install it ahead of the real launcher on PATH with `install -m 755 shim/claude ~/.local/shims/claude`. It fails open at every step: a missing or unreadable prompt file, a caller that already passes a `--system-prompt*` flag of its own, or a merge that cannot be written all fall back to a plain passthrough.
+
+Settings files are not an alternative route. In 2.1.240, `systemPromptFile` as a string, `systemPromptFile` as `{"type": "file", "path": …}`, and `systemPrompt` as the same object all leave the captured prompt byte-identical to the baseline, with no warning; a `model` key in the same file does take effect, which is what proves the file was read at all.
 
 ## Caveats
 
