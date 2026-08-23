@@ -20,24 +20,19 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install Claude Code
-        run: |
-          curl -fsSL https://claude.ai/install.sh | bash
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Record the CC version under test
-        run: |
-          # A capture diff can move because the runner picked up a new CC, not
-          # because the prompt changed. The provenance header records which.
-          "$HOME/.local/bin/claude" --version | tee -a "$GITHUB_STEP_SUMMARY"
-
       - name: Refresh captures
         run: ./scripts/refresh-captures.sh
+
+      - name: Summarize
+        if: always()
+        run: cat drift-report.md >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Detect drift
         id: drift
         run: |
-          if git diff --quiet -- captures/; then
+          # porcelain, not `git diff`: a new release lands as untracked files,
+          # which git diff never sees
+          if [ -z "$(git status --porcelain -- captures/ archive/)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -52,8 +47,6 @@ jobs:
             captures/**
             archive/**
           delete-branch: true
-          title: 'docs(captures): upstream system prompts drifted'
-          body: |
-            The daily capture run saw a different system prompt than the one in
-            `captures/`. Read the diff against `archive/` to tell an upstream
-            prompt change apart from a CC version bump.
+          commit-message: 'docs(captures): refresh upstream system prompts'
+          title: 'docs(captures): refresh upstream system prompts'
+          body-path: drift-report.md
