@@ -29,12 +29,22 @@ No home path survives, in either the slash-separated or the dash-encoded spellin
 
 Every capture carries a provenance header naming the observation date, the Claude Code version, and the model id.
 
+## The subagent prompt
+
+A Task subagent is sent a different system prompt, and that one reaches the wire only when something spawns a subagent. A rejected request never does. So the recorder has a second mode: it answers one request with a streamed `tool_use` for the spawning tool, which makes the CLI spawn a subagent for real. The subagent's own request then lands in the same recorder.
+
+The spawning tool is named `Agent` as of 2.1.241 and was `Task` before it, so the probe reads the name off the request's own tool list. Requests are told apart by Claude Code's own billing header, which stamps `cc_is_subagent=true` on a subagent's.
+
+All four Claude models normalize to a byte-identical subagent prompt, so `captures/subagent.md` covers them together. A non-Claude model is told its name differently and gets no knowledge-cutoff line, which `captures/subagent-deepseek.md` records separately.
+
+Pointing the same probe at the shim answers a second question: whether a session's `--system-prompt-file` reaches its subagents. It does not. A shim'd parent carrying 53 lines of custom prompt spawned a subagent carrying none, and that subagent's prompt matched a stock parent's byte for byte.
+
 ## Layout
 
 | path | role |
 |---|---|
-| `src/cc_prompts/` | the capture tool: recorder, spawn drivers, normalizer |
-| `captures/` | current normalized captures, one file per model per flavor |
+| `src/cc_prompts/` | the capture tool: recorder, spawn drivers, normalizer, subagent probe |
+| `captures/` | current normalized captures, one file per model per flavor, plus the two subagent captures |
 | `archive/<cc-version>/` | a snapshot of the whole set each time it changed |
 | `scripts/refresh-captures.sh` | re-capture and archive; the same script CI runs |
 | `shim/claude` | PATH wrapper that puts a custom system prompt in front of every spawn |
@@ -45,6 +55,7 @@ Every capture carries a provenance header naming the observation date, the Claud
 uv sync --frozen
 uv run cc-prompts-capture                  # every model, both flavors
 uv run cc-prompts-capture --models opus --mode cli
+uv run cc-prompts-subagent                 # spawn a subagent, print its prompt's size
 ./scripts/refresh-captures.sh              # capture, then archive on drift
 ```
 
