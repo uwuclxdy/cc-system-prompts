@@ -12,7 +12,11 @@ real=$(PATH="$p" command -v claude 2>/dev/null) || real=
 [ "$real" = "$HOME/.local/shims/claude" ] && real=
 : "${real:=$HOME/.local/bin/claude}"
 
-file=${CLAUDE_SYSTEM_PROMPT_FILE:-$HOME/.claude/system-prompt/cc-sys.md}
+# Assignment, not a read: the prompt path is fixed here and the environment
+# cannot redirect it. Tests move $HOME rather than setting this.
+CLAUDE_SYSTEM_PROMPT_FILE=$HOME/.claude/system-prompt/cc-sys.md
+
+file=${CLAUDE_SYSTEM_PROMPT_FILE:-$HOME/.config/claude/system-prompt.md}
 
 # Caller picked their own system prompt? claude hard-errors on mixed
 # --system-prompt/--system-prompt-file, so pass through untouched.

@@ -26,17 +26,20 @@ def shim(tmp_path):
     stub.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGV_OUT"\n')
     stub.chmod(0o755)
 
-    prompt = tmp_path / "cc-sys.md"
+    # the shim hardcodes this path off $HOME and ignores the environment, so the
+    # only way to steer it is to move $HOME
+    prompt = home / ".claude" / "system-prompt" / "cc-sys.md"
+    prompt.parent.mkdir(parents=True)
     prompt.write_text(PROMPT_BODY)
 
-    def run(*args, cwd=None, prompt_path=None, env_extra=None):
+    def run(*args, cwd=None, env_extra=None):
         env = {
             "PATH": f"{stub.parent}:/usr/bin:/bin",
             "HOME": str(home),
             "SHELL": "/bin/bash",
             "ARGV_OUT": str(argv_out),
             "XDG_RUNTIME_DIR": str(tmp_path / "run"),
-            "CLAUDE_SYSTEM_PROMPT_FILE": str(prompt if prompt_path is None else prompt_path),
+            "CLAUDE_SYSTEM_PROMPT_FILE": "/environment/must/not/win.md",
         } | (env_extra or {})
         result = subprocess.run(
             [str(SHIM), *args], env=env, cwd=cwd or tmp_path, check=True, capture_output=True
@@ -123,16 +126,23 @@ def test_shim_passes_through_when_the_caller_picked_its_own_prompt(shim, flag):
     assert argv == [flag, "/somewhere/else.md"]
 
 
-def test_shim_fails_open_when_the_prompt_file_is_unreadable(shim, tmp_path):
-    argv, _ = shim("-p", "hi", prompt_path=tmp_path / "absent.md")
+def test_shim_ignores_a_prompt_path_from_the_environment(shim):
+    argv, merged = shim("-p", "hi")
+    assert argv[1] != "/environment/must/not/win.md"
+    assert merged.startswith(PROMPT_BODY)
+
+
+def test_shim_fails_open_when_the_prompt_file_is_missing(shim):
+    shim.prompt.unlink()
+    argv, _ = shim("-p", "hi")
     assert argv == ["-p", "hi"]
 
 
-def test_shim_fails_open_when_the_prompt_path_is_a_directory(shim, tmp_path):
+def test_shim_fails_open_when_the_prompt_path_is_a_directory(shim):
     # `-r` passes a directory, and claude rejects one; the shim must not hand it over
-    notafile = tmp_path / "prompt-dir"
-    notafile.mkdir()
-    argv, _ = shim("-p", "hi", prompt_path=notafile)
+    shim.prompt.unlink()
+    shim.prompt.mkdir()
+    argv, _ = shim("-p", "hi")
     assert argv == ["-p", "hi"]
 
 
