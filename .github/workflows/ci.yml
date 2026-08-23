@@ -21,4 +21,4 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
-      - run: shellcheck scripts/*.sh
+      - run: shellcheck scripts/*.sh shim/claude

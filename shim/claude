@@ -1,0 +1,96 @@
+#!/bin/sh
+# claude shim: prepends --system-prompt-file to every invocation, transparent
+# otherwise (exec keeps fds, tty, signals, exit code; prints nothing).
+# wired in ~/.profile: ~/.local/shims precedes ~/.local/bin on PATH.
+# install with: install -m 755 shim/claude ~/.local/shims/claude
+
+# Resolve the real binary with this dir stripped from PATH. $0 is unusable
+# here: a PATH-spawned child (e.g. rust Command::new) keeps argv[0]="claude",
+# so a $0-derived dir plus PATH re-lookup could recurse into this shim.
+p=${PATH#"$HOME/.local/shims:"}
+real=$(PATH="$p" command -v claude 2>/dev/null) || real=
+[ "$real" = "$HOME/.local/shims/claude" ] && real=
+: "${real:=$HOME/.local/bin/claude}"
+
+file=${CLAUDE_SYSTEM_PROMPT_FILE:-$HOME/.claude/system-prompt/cc-sys.md}
+
+# Caller picked their own system prompt? claude hard-errors on mixed
+# --system-prompt/--system-prompt-file, so pass through untouched.
+for a in "$@"; do
+    case $a in
+    --system-prompt|--system-prompt=*|--system-prompt-file|--system-prompt-file=*|\
+    --append-system-prompt|--append-system-prompt=*|--append-system-prompt-file|--append-system-prompt-file=*)
+        exec "$real" "$@"
+    esac
+done
+
+# Missing, unreadable, or not a regular file: fail open, plain passthrough.
+# `-r` alone passes a directory, which claude would then be handed and reject.
+{ [ -f "$file" ] && [ -r "$file" ]; } || exec "$real" "$@"
+
+# The flag replaces the WHOLE stock system array rather than the prose around
+# it, `# Environment` included, so a session would otherwise know neither its
+# cwd nor its platform. Rebuild that block onto the end of the prompt. Every
+# step below fails open: `file` only moves once a non-empty merge exists.
+dir=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/cc-sys-prompt
+# exec leaves nothing to clean up with, so the spawn file carries this shell's
+# pid, which exec then hands to claude itself, and stale ones go on the way in.
+merged=$dir/$$.md
+if mkdir -p "$dir" 2>/dev/null && chmod 700 "$dir" 2>/dev/null; then
+    find "$dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null
+
+    # claude resolves the model from the account when --model is absent, which
+    # this shim cannot see, so the line is written only when the caller spells it
+    model=
+    prev=
+    for a in "$@"; do
+        case $prev in
+        --model) model=$a ;;
+        esac
+        case $a in
+        --model=*) model=${a#--model=} ;;
+        esac
+        prev=$a
+    done
+
+    # Walk up for `.git` rather than asking git: claude answers `true` for a tree
+    # git itself refuses over dubious ownership, and this block has to agree with
+    # what claude would have said.
+    repo=false
+    d=$PWD
+    while :; do
+        if [ -e "$d/.git" ]; then
+            repo=true
+            break
+        fi
+        [ "$d" = "/" ] && break
+        d=${d%/*}
+        [ -n "$d" ] || d=/
+    done
+
+    # Only facts this machine can answer. The stock block's remaining lines (the
+    # knowledge cutoff, the model roster, the availability and fast-mode blurbs)
+    # are upstream prose: copying them here forks the text this repo exists to
+    # track, and the fork would go stale with nothing to catch it.
+    # chained on && so a failed write anywhere decides the subshell's status: a
+    # trailing size or emptiness check has no input that can falsify it, since a
+    # merge that got as far as the block is never empty and never short
+    if (
+        umask 077
+        {
+            cat "$file" &&
+                printf '\n# Environment\nYou have been invoked in the following environment: \n' &&
+                printf ' - Primary working directory: %s\n' "$PWD" &&
+                printf ' - Is a git repository: %s\n' "$repo" &&
+                printf ' - Platform: %s\n' "$(uname -s | tr '[:upper:]' '[:lower:]')" &&
+                printf ' - Shell: %s\n' "${SHELL##*/}" &&
+                printf ' - OS Version: %s\n' "$(uname -sr)" &&
+                { [ -z "$model" ] || printf ' - The exact model ID is %s.\n' "$model"; }
+        } >"$merged"
+    ) 2>/dev/null; then
+        file=$merged
+    fi
+fi
+
+# Prepend, not append: a caller's `--` positional separator must stay last.
+exec "$real" --system-prompt-file "$file" "$@"
