@@ -155,30 +155,58 @@ class ForgeAgentCall:
         return agent_tool_use_sse(body.get("model", ""), tool_name, self.subagent_type)
 
 
+def _run_probe(
+    binary: str,
+    model_id: str,
+    mode: str,
+    config_dir: str,
+    workdir: str,
+    base_url: str,
+    server: RecorderServer,
+) -> None:
+    for use_flag in (True, False):
+        runner = runner_for(mode)
+        runner(
+            binary,
+            model_id,
+            config_dir,
+            workdir,
+            base_url,
+            use_flag,
+            server,
+            ready=has_subagent_request,
+            timeout=PROBE_TIMEOUT,
+        )
+        if has_subagent_request(server):
+            break
+
+
 def capture_pair(
-    binary: str, model_id: str, mode: str, subagent_type: str = PROBE_AGENT_TYPE
+    binary: str,
+    model_id: str,
+    mode: str,
+    subagent_type: str = PROBE_AGENT_TYPE,
+    *,
+    config_dir: str | None = None,
+    workdir: str | None = None,
 ) -> tuple[str, str]:
-    """Return the parent's system prompt and its subagent's, from one spawn."""
+    """Return the parent's system prompt and its subagent's, from one spawn.
+
+    With no workspace given the probe runs inside a throwaway onboarded one; a
+    pair of paths drives it inside a copied real config and workdir instead,
+    which is how a prompt block conditional on live state gets found.
+    """
+    if (config_dir is None) != (workdir is None):
+        raise RuntimeError("pass both config_dir and workdir, or neither")
     responder = ForgeAgentCall(subagent_type)
     server, port = start_recorder(responder)
     base_url = f"http://127.0.0.1:{port}"
     try:
-        with capture_workspace() as (workdir, config_dir):
-            runner = runner_for(mode)
-            for use_flag in (True, False):
-                runner(
-                    binary,
-                    model_id,
-                    config_dir,
-                    workdir,
-                    base_url,
-                    use_flag,
-                    server,
-                    ready=has_subagent_request,
-                    timeout=PROBE_TIMEOUT,
-                )
-                if has_subagent_request(server):
-                    break
+        if config_dir is None:
+            with capture_workspace() as (workdir, config_dir):
+                _run_probe(binary, model_id, mode, config_dir, workdir, base_url, server)
+        else:
+            _run_probe(binary, model_id, mode, config_dir, workdir, base_url, server)
         if responder.tools_seen and not responder.fired:
             raise RuntimeError(
                 f"no tool named any of {AGENT_TOOL_NAMES} in this build; "
@@ -208,12 +236,27 @@ def main(argv: list[str] | None = None) -> int:
         help=f"launcher to drive; {SHIM_BIN} gives the inheritance verdict its control",
     )
     parser.add_argument("--subagent-type", default=PROBE_AGENT_TYPE)
+    parser.add_argument(
+        "--config-dir",
+        help="drive the probe with this CLAUDE_CONFIG_DIR instead of a throwaway one "
+        "(needs --workdir too)",
+    )
+    parser.add_argument(
+        "--workdir",
+        help="drive the probe from this working directory instead of a throwaway one "
+        "(needs --config-dir too)",
+    )
     parser.add_argument("--out", type=Path, help="write the normalized subagent prompt here")
     args = parser.parse_args(argv)
 
     custom = custom_prompt_text()
     parent, subagent = capture_pair(
-        args.claude_bin, MODELS[args.model], args.mode, args.subagent_type
+        args.claude_bin,
+        MODELS[args.model],
+        args.mode,
+        args.subagent_type,
+        config_dir=args.config_dir,
+        workdir=args.workdir,
     )
     in_parent = custom_markers(parent, custom)
     in_subagent = custom_markers(subagent, custom)

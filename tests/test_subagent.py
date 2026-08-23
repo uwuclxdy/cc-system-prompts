@@ -1,11 +1,14 @@
 import json
 
+import pytest
+
 from cc_prompts.subagent import (
     PROBE_AGENT_TYPE,
     SUBAGENT_MARK,
     ForgeAgentCall,
     agent_tool_name,
     agent_tool_use_sse,
+    capture_pair,
     is_subagent_request,
     main,
     pick_parent_request,
@@ -165,3 +168,34 @@ def test_main_refuses_to_write_a_capture_that_leaked_the_custom_prompt(
     assert main(["--out", str(target)]) == 1
     assert "LEAK" in capsys.readouterr().out
     assert not target.exists()
+
+
+def test_capture_pair_refuses_half_a_workspace():
+    with pytest.raises(RuntimeError, match="both config_dir and workdir"):
+        capture_pair("claude", "model", "cli", config_dir="/tmp/cfg")
+
+
+def test_capture_pair_drives_the_given_workspace(monkeypatch):
+    import cc_prompts.subagent as mod
+
+    calls = []
+
+    def fake_runner(binary, model_id, config_dir, workdir, base_url, use_flag, server, **kwargs):
+        calls.append((config_dir, workdir))
+
+    def boom():
+        raise AssertionError("the probe must not create a throwaway workspace")
+
+    monkeypatch.setattr(mod, "runner_for", lambda mode: fake_runner)
+    monkeypatch.setattr(mod, "has_subagent_request", lambda server: True)
+    monkeypatch.setattr(mod, "pick_parent_request", lambda requests: "parent\n")
+    monkeypatch.setattr(mod, "pick_subagent_request", lambda requests: "subagent\n")
+    monkeypatch.setattr(mod, "extract_system", lambda system: system)
+    monkeypatch.setattr(mod, "capture_workspace", boom)
+
+    parent, subagent = capture_pair(
+        "claude", "model", "cli", config_dir="/tmp/cfg", workdir="/tmp/wd"
+    )
+
+    assert calls == [("/tmp/cfg", "/tmp/wd")]
+    assert (parent, subagent) == ("parent\n", "subagent\n")
