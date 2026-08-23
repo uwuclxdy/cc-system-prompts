@@ -19,7 +19,9 @@ A `claude -p` run marks the session non-interactive, so capturing the CLI flavor
 
 No upstream API is involved. A stdlib HTTP server binds a loopback port, the CLI is pointed at it through `ANTHROPIC_BASE_URL` with a dummy key, and the server records each request's `system` blocks and answers 400. One rejected request per model is enough.
 
-Each spawn gets a fresh config dir seeded with onboarding plus folder trust, and a temporary working directory, so no project's files or history are loaded as context. That is not the same as a context-free prompt: the temp dir follows `TMPDIR`, and if that path happens to sit inside a git checkout, Claude Code walks up, finds it, and stamps a `gitStatus:` block into the prompt.
+Each spawn gets a fresh config dir seeded with onboarding plus folder trust, and a temporary working directory, so no project's files or history are loaded as context. That is not the same as a context-free prompt: the temp dir follows `TMPDIR`, and Claude Code walks up from it looking for a git checkout, stamping a `gitStatus:` block into the prompt when it finds one.
+
+Whether it finds one is a property of the machine, not of the capture, which made that whole block read as drift at every boundary between a laptop and a CI runner. So the temp dir is given its own empty repository, with its own local git identity, and the block is then present everywhere. Its values are normalized away; the labels are upstream prompt text, and a change to them is exactly what this repo tracks. A capture missing the block is refused rather than written, since a missing block means the seed did not take.
 
 So normalization, not isolation, is what makes a capture publishable. Before writing, the tool replaces everything machine-specific: dates, working directory, OS version, model line, knowledge cutoff, session ids, remaining-token lines, memory paths, and the whole `gitStatus:` body (branch names, git identity, working-tree paths, commit subjects). The block's labels survive, because their wording is upstream prompt text and a change to it is exactly what this repo tracks.
 
