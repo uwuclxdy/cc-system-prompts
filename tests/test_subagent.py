@@ -7,6 +7,7 @@ from cc_prompts.subagent import (
     agent_tool_name,
     agent_tool_use_sse,
     is_subagent_request,
+    main,
     pick_parent_request,
     pick_subagent_request,
 )
@@ -121,3 +122,46 @@ def test_pickers_split_a_mixed_request_log():
 def test_pickers_return_none_when_their_side_never_arrived():
     assert pick_subagent_request([PARENT]) is None
     assert pick_parent_request([SUBAGENT]) is None
+
+
+CUSTOM = "an option's text names the action you will take, not just the situation."
+
+
+def _stub_run(monkeypatch, parent: str, sub: str):
+    from cc_prompts import subagent as mod
+
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: CUSTOM)
+    monkeypatch.setattr(mod, "claude_version", lambda binary: "2.1.241")
+    monkeypatch.setattr(mod, "capture_pair", lambda *a, **k: (parent, sub))
+
+
+def test_main_states_the_verdict_when_the_parent_carried_the_custom_prompt(monkeypatch, capsys):
+    _stub_run(monkeypatch, f"parent\n{CUSTOM}\n", "subagent prompt\n")
+    assert main([]) == 0
+    assert "does not reach the subagent" in capsys.readouterr().out
+
+
+def test_main_skips_the_control_note_when_it_is_writing_a_capture(monkeypatch, capsys, tmp_path):
+    # a stock run is a capture run, and it never asked about inheritance, so the
+    # daily refresh log carries no line that reads like a failure
+    _stub_run(monkeypatch, "stock parent\n", "subagent prompt\n")
+    target = tmp_path / "subagent.md"
+    assert main(["--out", str(target)]) == 0
+    assert "no inheritance control" not in capsys.readouterr().out
+    assert target.read_text().endswith("subagent prompt\n\n")
+
+
+def test_main_says_so_when_a_verdict_run_had_no_control(monkeypatch, capsys):
+    _stub_run(monkeypatch, "stock parent\n", "subagent prompt\n")
+    assert main([]) == 0
+    assert "no inheritance control" in capsys.readouterr().out
+
+
+def test_main_refuses_to_write_a_capture_that_leaked_the_custom_prompt(
+    monkeypatch, capsys, tmp_path
+):
+    _stub_run(monkeypatch, f"parent\n{CUSTOM}\n", f"subagent\n{CUSTOM}\n")
+    target = tmp_path / "subagent.md"
+    assert main(["--out", str(target)]) == 1
+    assert "LEAK" in capsys.readouterr().out
+    assert not target.exists()

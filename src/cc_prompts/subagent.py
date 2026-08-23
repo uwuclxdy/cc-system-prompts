@@ -233,9 +233,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {args.out}")
     if in_parent:
         print("the custom prompt does not reach the subagent")
-    elif custom:
+    elif custom and not args.out:
         # without a shim'd parent there is nothing the subagent could have
-        # inherited, so a clean subagent is not evidence about inheritance
+        # inherited, so a clean subagent is not evidence about inheritance. a
+        # run writing a capture was never asking, so it does not hear about it
         print(f"no inheritance control: {args.claude_bin} left the parent prompt stock")
     return 0
 
