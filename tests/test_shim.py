@@ -155,17 +155,33 @@ def test_shim_falls_back_to_the_plain_prompt_when_the_merge_cannot_be_written(sh
     assert merged == PROMPT_BODY
 
 
+def _age(path):
+    old = 1_700_000_000
+    os.utime(path, (old, old))
+
+
 def test_shim_prunes_stale_spawn_files(shim):
     shim("-p", "hi")
     spawn_dir = shim.runtime / "cc-sys-prompt"
     stale = spawn_dir / "999999.md"
     stale.write_text("old spawn")
-    old = 1_700_000_000
-    os.utime(stale, (old, old))
+    _age(stale)
     fresh = next(p for p in spawn_dir.iterdir() if p != stale)
     shim("-p", "hi")
     assert not stale.exists()
     assert fresh.exists()
+
+
+def test_shim_spares_an_old_spawn_file_whose_process_is_alive(shim):
+    # a session up longer than the window still owns its prompt file, and whether
+    # claude re-reads it after startup is not the shim's to assume
+    shim("-p", "hi")
+    spawn_dir = shim.runtime / "cc-sys-prompt"
+    live = spawn_dir / f"{os.getpid()}.md"
+    live.write_text("a long-running session's prompt")
+    _age(live)
+    shim("-p", "hi")
+    assert live.exists()
 
 
 def test_shim_keeps_its_spawn_directory_private(shim):

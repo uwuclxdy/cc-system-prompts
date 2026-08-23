@@ -41,7 +41,14 @@ dir=${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/cc-sys-prompt
 # pid, which exec then hands to claude itself, and stale ones go on the way in.
 merged=$dir/$$.md
 if mkdir -p "$dir" 2>/dev/null && chmod 700 "$dir" 2>/dev/null; then
-    find "$dir" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null
+    # Age alone would reap a session that has been up longer than the window, and
+    # whether claude re-reads this file after startup is not something the shim
+    # gets to assume. Reap only what is both old and no longer running.
+    find "$dir" -maxdepth 1 -type f -name '*.md' -mmin +1440 2>/dev/null |
+        while IFS= read -r old; do
+            pid=${old##*/}
+            kill -0 "${pid%.md}" 2>/dev/null || rm -f "$old"
+        done
 
     # claude resolves the model from the account when --model is absent, which
     # this shim cannot see, so the line is written only when the caller spells it
