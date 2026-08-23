@@ -1,3 +1,5 @@
+import subprocess
+
 import pytest
 
 from cc_prompts.capture import (
@@ -71,8 +73,11 @@ def test_custom_prompt_text_reads_the_first_readable_candidate(tmp_path):
     assert custom_prompt_text((tmp_path / "absent.md", second)) == "body"
 
 
-def test_validate_gitstatus_accepts_a_capture_that_carries_the_block():
-    validate_gitstatus("preamble\ngitStatus: This is the git status at the start\n")
+SEEDED = "gitStatus: This is the git status at the start\nGit user: capture\n"
+
+
+def test_validate_gitstatus_accepts_a_capture_that_carries_both_markers():
+    validate_gitstatus(f"preamble\n{SEEDED}")
 
 
 def test_validate_gitstatus_rejects_a_capture_missing_the_block():
@@ -82,9 +87,26 @@ def test_validate_gitstatus_rejects_a_capture_missing_the_block():
         validate_gitstatus("preamble\nno block here\n")
 
 
+def test_validate_gitstatus_rejects_a_block_with_no_identity_line():
+    # a box with a global git identity and a bare runner differ on this line alone
+    with pytest.raises(RuntimeError, match="Git user"):
+        validate_gitstatus("preamble\ngitStatus: snapshot\nStatus:\n")
+
+
 def test_seed_repo_makes_the_workdir_its_own_repository(tmp_path):
     seed_repo(str(tmp_path))
     assert (tmp_path / ".git").is_dir()
+
+
+def test_seed_repo_gives_the_workdir_a_local_identity(tmp_path):
+    seed_repo(str(tmp_path))
+    shown = subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "--local", "user.name"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert shown.stdout.strip() == "capture"
 
 
 def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
@@ -92,7 +114,7 @@ def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
     # would otherwise reach write_capture and land in `captures/`
     from cc_prompts import capture as capture_mod
 
-    shimd = f"{SDK_IDENTITY}.\n{CUSTOM_LINE}\ngitStatus: snapshot\n" + "x" * 5000
+    shimd = f"{SDK_IDENTITY}.\n{CUSTOM_LINE}\ngitStatus: snapshot\nGit user: capture\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": shimd}]})
@@ -107,7 +129,7 @@ def test_capture_model_returns_a_stock_capture(monkeypatch):
     # the control: same call path, same scope, a body the guard must NOT refuse
     from cc_prompts import capture as capture_mod
 
-    stock = f"{SDK_IDENTITY}.\n# Environment\ngitStatus: snapshot\n" + "x" * 5000
+    stock = f"{SDK_IDENTITY}.\n# Environment\ngitStatus: snapshot\nGit user: capture\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": stock}]})

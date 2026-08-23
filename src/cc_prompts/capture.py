@@ -75,18 +75,29 @@ def seed_repo(workdir: str) -> None:
     refresh and the daily one. Owning the repo fixes the block in place; its
     values are normalized away regardless, and an empty repo is enough
     (MEASURED 2026-08-23, `git init` in a repo-free dir under /var/tmp).
+
+    The identity is the same story one level down: claude writes the block's
+    `Git user:` line only when git resolves one, so a box with a global identity
+    and a bare runner disagree on that line alone. A local identity in the
+    throwaway repo settles it and touches no config outside `workdir`.
     """
     subprocess.run(["git", "init", "-q", workdir], check=True, capture_output=True)
+    for key, value in (("user.name", "capture"), ("user.email", "capture@example.invalid")):
+        subprocess.run(
+            ["git", "-C", workdir, "config", key, value], check=True, capture_output=True
+        )
 
 
 def validate_gitstatus(system: str) -> None:
-    """Guard the artifact of record: the `gitStatus:` block `seed_repo` buys.
+    """Guard the artifact of record: what `seed_repo` buys, both halves of it.
 
-    A missing block means the seed did not take, and the capture is then not
-    comparable with one from any other machine.
+    A missing block, or a block without the identity line, means the seed did
+    not fully take, and the capture is then not comparable with one from any
+    other machine.
     """
-    if "gitStatus:" not in system:
-        raise RuntimeError("capture carries no gitStatus block; the workdir seed did not take")
+    for marker in ("gitStatus:", "Git user:"):
+        if marker not in system:
+            raise RuntimeError(f"capture carries no {marker!r}; the workdir seed did not take")
 
 
 def custom_prompt_text(paths: tuple[Path, ...] = CUSTOM_PROMPT_PATHS) -> str:
