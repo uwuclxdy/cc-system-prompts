@@ -1,7 +1,7 @@
 [project]
 name            = "cc-system-prompts"
 version         = "0.1.0"
-description     = "track CC per-model prompts as reviewable diffs"
+description     = "extract Claude Code per-model system prompts as reviewable diffs"
 requires-python = ">=3.12"
 license         = { text = "MIT" }
 dependencies = []

@@ -1,8 +1,8 @@
 # cc-system-prompts
 
-Track Claude Code's per-model system prompts as reviewable diffs.
+Extracted Claude Code per-model system prompts as reviewable diffs.
 
-Claude Code builds its system prompt on the client, so the prompt a given model receives is observable without touching Anthropic's API. This repo captures that prompt per model, normalizes it, and commits it. A daily job re-captures and opens a PR when anything moved, which turns a silent upstream prompt change into a diff someone can read.
+Claude Code builds its system prompt on the client, so the prompt a given model receives is observable without touching Anthropic's API. This repo captures that prompt per model, normalizes it, and commits it. A daily job captures every release that landed since the last run, snapshots each one, and opens a PR when anything moved, which turns a silent upstream prompt change into a diff someone can read. The release list comes from the Claude Code changelog; the binaries come from the official release CDN.
 
 ## What it captures
 
@@ -45,8 +45,8 @@ Pointing the same probe at the shim answers a second question: whether a session
 |---|---|
 | `src/cc_prompts/` | the capture tool: recorder, spawn drivers, normalizer, subagent probe |
 | `captures/` | current normalized captures, one file per model per flavor, plus the two subagent captures |
-| `archive/<cc-version>/` | a snapshot of the whole set each time it changed |
-| `scripts/refresh-captures.sh` | re-capture and archive; the same script CI runs |
+| `archive/<cc-version>/` | one snapshot per release; adjacent dirs diff to the prompt change |
+| `scripts/refresh-captures.sh` | capture every release since the last one and archive each; the same script CI runs |
 | `shim/claude` | PATH wrapper that puts a custom system prompt in front of every spawn |
 
 ## Running it
@@ -56,10 +56,10 @@ uv sync --frozen
 uv run cc-prompts-capture                  # every model, both flavors
 uv run cc-prompts-capture --models opus --mode cli
 uv run cc-prompts-subagent                 # spawn a subagent, print its prompt's size
-./scripts/refresh-captures.sh              # capture, then archive on drift
+./scripts/refresh-captures.sh              # capture every release since the last committed capture
 ```
 
-The capture must run against the real `claude` launcher. Pointing it at a wrapper that injects `--system-prompt-file` would record that custom prompt instead of the stock one, so the capture is refused when its text matches the custom prompt's. `refresh-captures.sh` rejects a launcher path under a `shims` directory before any capture runs.
+`refresh-captures.sh` downloads each release binary from the official CDN, checksum-verified against the release manifest, so nothing on the machine decides which version gets recorded. A manual `cc-prompts-capture` still runs against the real `claude` launcher: pointing it at a wrapper that injects `--system-prompt-file` would record that custom prompt instead of the stock one, so the capture is refused when its text matches the custom prompt's.
 
 ## The shim
 
@@ -71,6 +71,6 @@ Settings files are not an alternative route. In 2.1.240, `systemPromptFile` as a
 
 ## Caveats
 
-A capture diff can move for two different reasons: Anthropic changed the prompt, or the runner picked up a new Claude Code version. The provenance header and the per-version archive separate them.
+A capture diff can move for two different reasons: Anthropic changed the prompt, or a release landed. The provenance header and the per-version archive separate them; adjacent archive dirs differ in the header only when a release changed no prompt bytes.
 
 The prompt text here is Anthropic's, reproduced as observed for change tracking.
