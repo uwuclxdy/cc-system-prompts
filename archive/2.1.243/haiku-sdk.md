@@ -1,6 +1,6 @@
-observed 2026-08-25 (wire capture, CC 2.1.245, claude-haiku-4-5-20251001)
+observed 2026-08-25 (wire capture, CC 2.1.243, claude-haiku-4-5-20251001)
 
-x-anthropic-billing-header: cc_version=2.1.245.fe7; cc_entrypoint=sdk-cli;
+x-anthropic-billing-header: cc_version=2.1.243.f99; cc_entrypoint=sdk-cli;
 You are a Claude agent, built on Anthropic's Claude Agent SDK.
 
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
