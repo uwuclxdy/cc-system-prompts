@@ -1,0 +1,44 @@
+{
+  "version": "2.1.241",
+  "observed": "2026-08-23",
+  "captures": {
+    "deepseek-chat-sdk.md": {
+      "model": "deepseek-chat"
+    },
+    "deepseek-chat.md": {
+      "model": "deepseek-chat"
+    },
+    "fable-sdk.md": {
+      "model": "claude-fable-5"
+    },
+    "fable.md": {
+      "model": "claude-fable-5"
+    },
+    "haiku-sdk.md": {
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "haiku.md": {
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "opus-sdk.md": {
+      "model": "claude-opus-5"
+    },
+    "opus.md": {
+      "model": "claude-opus-5"
+    },
+    "sonnet-sdk.md": {
+      "model": "claude-sonnet-5"
+    },
+    "sonnet.md": {
+      "model": "claude-sonnet-5"
+    },
+    "subagent-deepseek.md": {
+      "model": "deepseek-chat",
+      "note": "subagent"
+    },
+    "subagent.md": {
+      "model": "claude-opus-5",
+      "note": "subagent"
+    }
+  }
+}

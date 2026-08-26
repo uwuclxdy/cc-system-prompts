@@ -1,5 +1,3 @@
-observed 2026-08-23 (wire capture, CC 2.1.241, claude-opus-5)
-
 x-anthropic-billing-header: cc_version=2.1.241.c95; cc_entrypoint=sdk-cli;
 You are a Claude agent, built on Anthropic's Claude Agent SDK.
 
