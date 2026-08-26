@@ -23,7 +23,6 @@ from .capture import (
     MIN_SYSTEM_SIZE,
     MODELS,
     _system_size,
-    capture_header,
     capture_workspace,
     claude_version,
     custom_markers,
@@ -32,6 +31,7 @@ from .capture import (
     pick_request,
     runner_for,
 )
+from .meta import record_capture
 from .normalize import normalize
 from .recorder import RecorderServer, start_recorder, stop_recorder
 
@@ -271,8 +271,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.out:
         version = claude_version(args.claude_bin)
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        header = capture_header(MODELS[args.model], version, "subagent")
-        args.out.write_text(header + normalize(subagent) + "\n")
+        args.out.write_text(normalize(subagent) + "\n")
+        record_capture(args.out.parent, args.out.name, MODELS[args.model], version, "subagent")
         print(f"wrote {args.out}")
     if in_parent:
         print("the custom prompt does not reach the subagent")

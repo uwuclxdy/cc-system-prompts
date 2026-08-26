@@ -1,5 +1,5 @@
+import json
 import subprocess
-from datetime import date
 
 import pytest
 
@@ -7,7 +7,6 @@ from cc_prompts.capture import (
     CLI_IDENTITY,
     SDK_IDENTITY,
     _system_size,
-    capture_header,
     custom_prompt_text,
     extract_system,
     pick_request,
@@ -157,26 +156,13 @@ def test_capture_model_refuses_a_capture_with_no_gitstatus(monkeypatch):
         capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk")
 
 
-def test_capture_header_keeps_the_shape_the_refresh_script_parses():
-    # refresh-captures.sh sed-matches `, CC <version>,` out of line 1 to name the
-    # archive directory, and the date is the capture's only provenance
-    assert capture_header("claude-opus-5", "2.1.239") == (
-        f"observed {date.today().isoformat()} (wire capture, CC 2.1.239, claude-opus-5)\n\n"
-    )
-
-
-def test_capture_header_appends_a_note_for_the_flavors_that_need_one():
-    header = capture_header("claude-opus-5", "2.1.239", "subagent")
-    assert header.startswith(f"observed {date.today().isoformat()} (wire capture, CC 2.1.239, ")
-    assert header.endswith("claude-opus-5, subagent)\n\n")
-
-
 def test_write_capture_names_sdk_files_with_the_suffix(tmp_path):
     target = write_capture(tmp_path, "opus", "claude-opus-5", "2.1.239", "body", "sdk")
     assert target == tmp_path / "opus-sdk.md"
-    assert (tmp_path / "opus-sdk.md").read_text() == (
-        capture_header("claude-opus-5", "2.1.239") + "body\n"
-    )
+    assert (tmp_path / "opus-sdk.md").read_text() == "body\n"
+    meta = json.loads((tmp_path / "meta.json").read_text())
+    assert meta["captures"] == {"opus-sdk.md": {"model": "claude-opus-5"}}
+    assert meta["version"] == "2.1.239"
 
 
 def test_write_capture_names_cli_files_without_a_suffix(tmp_path):

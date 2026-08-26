@@ -19,9 +19,9 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
-from datetime import date
 from pathlib import Path
 
+from .meta import record_capture
 from .normalize import normalize
 from .recorder import RecorderServer, start_recorder, stop_recorder
 
@@ -321,21 +321,15 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
         stop_recorder(server)
 
 
-def capture_header(model_id: str, version: str, note: str = "") -> str:
-    detail = f", {note}" if note else ""
-    return (
-        f"observed {date.today().isoformat()} (wire capture, CC {version}, {model_id}{detail})\n\n"
-    )
-
-
 def write_capture(
     out_dir: Path, name: str, model_id: str, version: str, text: str, mode: str
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
-    header = capture_header(model_id, version)
     suffix = "-sdk" if mode == "sdk" else ""
-    target = out_dir / f"{name}{suffix}.md"
-    target.write_text(header + normalize(text) + "\n")
+    filename = f"{name}{suffix}.md"
+    target = out_dir / filename
+    target.write_text(normalize(text) + "\n")
+    record_capture(out_dir, filename, model_id, version)
     return target
 
 

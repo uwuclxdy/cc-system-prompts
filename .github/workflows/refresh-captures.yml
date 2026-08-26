@@ -45,7 +45,9 @@ jobs:
           branch: chore/refresh-captures
           add-paths: |
             captures/**
+            captures/meta.json
             archive/**
+            archive/**/meta.json
           delete-branch: true
           commit-message: 'docs(captures): refresh upstream system prompts'
           title: 'docs(captures): refresh upstream system prompts'
