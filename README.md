@@ -2,7 +2,7 @@
 
 Extracted Claude Code per-model system prompts as reviewable diffs.
 
-Claude Code builds its system prompt on the client, so the prompt a given model receives is observable without touching Anthropic's API. This repo captures that prompt per model, normalizes it, and commits it. A daily job captures every release that landed since the last run, snapshots each one, and opens a PR when anything moved, which turns a silent upstream prompt change into a diff someone can read. The release list comes from the Claude Code changelog; the binaries come from the official release CDN.
+Claude Code builds its system prompt on the client, so the prompt a given model receives is observable without touching Anthropic's API. This repo captures that prompt per model, normalizes it, and commits it. A daily job captures every release that landed since the last run, snapshots each one, and opens a PR when anything moved, which turns a silent upstream prompt change into a diff someone can read. The PR description lists each changed prompt with its added/removed line counts and the changed lines themselves. The release list comes from the Claude Code changelog; the binaries come from the official release CDN.
 
 ## What it captures
 
@@ -27,7 +27,7 @@ So normalization, not isolation, is what makes a capture publishable. Before wri
 
 No home path survives, in either the slash-separated or the dash-encoded spelling. A bare account name is caught separately, since it arrives with no path around it for a path-shaped rule to match.
 
-Every capture carries a provenance header naming the observation date, the Claude Code version, and the model id.
+Every capture set carries a `meta.json` sidecar naming the observation date, the Claude Code version, and the per-file model id. The `.md` files hold prompt text only.
 
 ## The subagent prompt
 
@@ -44,8 +44,8 @@ Pointing the same probe at the shim answers a second question: whether a session
 | path | role |
 |---|---|
 | `src/cc_prompts/` | the capture tool: recorder, spawn drivers, normalizer, subagent probe |
-| `captures/` | current normalized captures, one file per model per flavor, plus the two subagent captures |
-| `archive/<cc-version>/` | one snapshot per release; adjacent dirs diff to the prompt change |
+| `captures/` | current normalized captures, one file per model per flavor, plus the two subagent captures; `meta.json` holds the set's provenance |
+| `archive/<cc-version>/` | one snapshot per release, each with its own `meta.json`; adjacent dirs diff to the prompt change |
 | `scripts/refresh-captures.sh` | capture every release since the last one and archive each; the same script CI runs |
 | `shim/claude` | PATH wrapper that puts a custom system prompt in front of every spawn |
 
@@ -71,6 +71,6 @@ Settings files are not an alternative route. In 2.1.240, `systemPromptFile` as a
 
 ## Caveats
 
-A capture diff can move for two different reasons: Anthropic changed the prompt, or a release landed. The provenance header and the per-version archive separate them; adjacent archive dirs differ in the header only when a release changed no prompt bytes.
+A capture diff can move for two different reasons: Anthropic changed the prompt, or a release landed. The provenance sidecar and the per-version archive separate them; adjacent archive dirs differ only in `meta.json` when a release changed no prompt bytes.
 
 The prompt text here is Anthropic's, reproduced as observed for change tracking.
