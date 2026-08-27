@@ -1,5 +1,3 @@
-observed 2026-08-26 (wire capture, CC 2.1.246, claude-fable-5)
-
 x-anthropic-billing-header: cc_version=2.1.246.0ab; cc_entrypoint=cli;
 You are Claude Code, Anthropic's official CLI for Claude.
 

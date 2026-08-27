@@ -1,5 +1,3 @@
-observed 2026-08-25 (wire capture, CC 2.1.243, deepseek-chat)
-
 x-anthropic-billing-header: cc_version=2.1.243.f99; cc_entrypoint=cli;
 You are Claude Code, Anthropic's official CLI for Claude.
 
