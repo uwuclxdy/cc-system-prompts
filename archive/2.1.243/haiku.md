@@ -1,6 +1,6 @@
-observed 2026-08-26 (wire capture, CC 2.1.246, claude-haiku-4-5-20251001)
+observed 2026-08-25 (wire capture, CC 2.1.243, claude-haiku-4-5-20251001)
 
-x-anthropic-billing-header: cc_version=2.1.246.0ab; cc_entrypoint=cli;
+x-anthropic-billing-header: cc_version=2.1.243.f99; cc_entrypoint=cli;
 You are Claude Code, Anthropic's official CLI for Claude.
 
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
