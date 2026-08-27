@@ -1,4 +1,3 @@
-x-anthropic-billing-header: cc_version=2.1.240.7d0; cc_entrypoint=sdk-cli;
 You are a Claude agent, built on Anthropic's Claude Agent SDK.
 
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
