@@ -157,3 +157,22 @@ def test_the_env_cwd_rule_only_claims_a_line_it_starts():
 def test_normalize_is_idempotent():
     once = normalize(build_git_status_sample())
     assert normalize(once) == once
+
+
+def test_the_billing_header_line_is_dropped():
+    """The block rides the wire as transport metadata and no model ever sees it
+    (MEASURED 2026-08-27, native and clauth sessions), so the artifact of record
+    must not carry it."""
+    text = normalize(
+        "x-anthropic-billing-header: cc_version=2.1.247.cfd; cc_entrypoint=cli;\n"
+        "You are Claude Code, Anthropic's official CLI for Claude.\n"
+    )
+    assert text == "You are Claude Code, Anthropic's official CLI for Claude.\n"
+
+
+def test_the_subagent_billing_header_line_is_dropped_too():
+    text = normalize(
+        "x-anthropic-billing-header: cc_version=2.1.247.672; cc_entrypoint=cli; "
+        "cc_is_subagent=true;\nrest\n"
+    )
+    assert text == "rest\n"

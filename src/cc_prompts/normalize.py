@@ -7,6 +7,11 @@ Upstream prompt changes then show as the only diff between two captures.
 import os
 import re
 
+# transport metadata: the block rides the wire, then vanishes before the model
+# sees it (MEASURED 2026-08-27: a native session and a clauth session both
+# report the line absent from their context). the artifact of record drops it.
+_BILLING_LINE = re.compile(r"^x-anthropic-billing-header:.*(?:\n|$)", re.MULTILINE)
+
 _LINE_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(Primary working directory: ).+"), r"\1<cwd>"),
     (re.compile(r"(Is a git repository: )(?:true|false)"), r"\1<git-repo>"),
@@ -50,6 +55,7 @@ _ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 def normalize(text: str) -> str:
+    text = _BILLING_LINE.sub("", text)
     for pattern, repl in _LINE_RULES:
         text = pattern.sub(repl, text)
     text = _GIT_STATUS_BODY.sub(r"\1<git-status>", text)
