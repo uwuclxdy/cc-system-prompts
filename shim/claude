@@ -4,12 +4,27 @@
 # wired in ~/.profile: ~/.local/shims precedes ~/.local/bin on PATH.
 # install with: install -m 755 shim/claude ~/.local/shims/claude
 
-# Resolve the real binary with this dir stripped from PATH. $0 is unusable
-# here: a PATH-spawned child (e.g. rust Command::new) keeps argv[0]="claude",
-# so a $0-derived dir plus PATH re-lookup could recurse into this shim.
-p=${PATH#"$HOME/.local/shims:"}
-real=$(PATH="$p" command -v claude 2>/dev/null) || real=
-[ "$real" = "$HOME/.local/shims/claude" ] && real=
+# Resolve the real binary by walking PATH and skipping this shim itself. `$0`
+# names the file the kernel exec'd even when argv[0] is "claude" (measured:
+# a PATH-spawned child still sees the script path), so it is the self to skip;
+# when it does not name an existing file, the installed location off the real
+# home (getent, never $HOME, which tests move) is. No candidate left: fall
+# back to $HOME/.local/bin/claude, as before.
+self=$0
+[ -e "$self" ] || self=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)/.local/shims/claude
+[ -e "$self" ] || self=$HOME/.local/shims/claude
+real=$(
+    IFS=:
+    set -f
+    for d in $PATH; do
+        [ -n "$d" ] || d=.
+        cand=$d/claude
+        [ -x "$cand" ] && [ -f "$cand" ] || continue
+        [ "$cand" -ef "$self" ] && continue
+        printf '%s\n' "$cand"
+        break
+    done
+)
 : "${real:=$HOME/.local/bin/claude}"
 
 # Assignment, not a read: the prompt path is fixed here and the environment

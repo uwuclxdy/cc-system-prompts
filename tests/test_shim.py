@@ -192,6 +192,66 @@ def test_shim_keeps_its_spawn_directory_private(shim):
         assert spawn.stat().st_mode & 0o077 == 0
 
 
+def _recursion_env(shim, tmp_path, path_head):
+    """PATH whose first entry still resolves `claude` to the shim itself."""
+    stub_dir = shim.home / ".local" / "bin"
+    return {
+        "PATH": f"{path_head}:{stub_dir}:/usr/bin:/bin",
+        "HOME": str(shim.home),
+        "SHELL": "/bin/bash",
+        "ARGV_OUT": str(tmp_path / "argv.txt"),
+        "XDG_RUNTIME_DIR": str(tmp_path / "run"),
+        "CLAUDE_SYSTEM_PROMPT_FILE": "/environment/must/not/win.md",
+    }
+
+
+def test_shim_does_not_exec_itself_when_its_own_dir_is_first_on_path(shim, tmp_path):
+    # $HOME moved off the real home, so the old prefix strip removes nothing and
+    # `command -v claude` resolves to the shim; the shim must skip itself by
+    # identity and exec the stub, not recurse until the timeout kills it
+    env = _recursion_env(shim, tmp_path, str(SHIM.parent))
+    subprocess.run(
+        [str(SHIM), "-p", "hi"], env=env, cwd=tmp_path, capture_output=True, timeout=5, check=True
+    )
+    argv = (tmp_path / "argv.txt").read_text().splitlines()
+    assert argv[0] == "--system-prompt-file"
+    assert argv[2:] == ["-p", "hi"]
+
+
+def test_shim_skips_a_symlink_to_itself_on_path(shim, tmp_path):
+    # a `claude` symlink in some other PATH dir points at the shim; `$0` then
+    # names that symlink, and the identity skip must still beat the recursion
+    link_dir = tmp_path / "links"
+    link_dir.mkdir()
+    link = link_dir / "claude"
+    link.symlink_to(SHIM)
+    env = _recursion_env(shim, tmp_path, str(link_dir))
+    subprocess.run(
+        [str(link), "-p", "hi"], env=env, cwd=tmp_path, capture_output=True, timeout=5, check=True
+    )
+    argv = (tmp_path / "argv.txt").read_text().splitlines()
+    assert argv[0] == "--system-prompt-file"
+    assert argv[2:] == ["-p", "hi"]
+
+
+def test_shim_resolves_a_claude_elsewhere_on_path_before_the_home_fallback(shim, tmp_path):
+    # the walk's own job: a `claude` in a PATH dir other than $HOME/.local/bin wins over the
+    # fallback, and the shim's own dir first on PATH is still skipped by identity
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    stub = other / "claude"
+    stub.write_text('#!/bin/sh\nprintf "ELSEWHERE\\n%s\\n" "$@" > "$ARGV_OUT"\n')
+    stub.chmod(0o755)
+    env = _recursion_env(shim, tmp_path, str(SHIM.parent))
+    env["PATH"] = f"{SHIM.parent}:{other}:{shim.home / '.local' / 'bin'}:/usr/bin:/bin"
+    subprocess.run(
+        [str(SHIM), "-p", "hi"], env=env, cwd=tmp_path, capture_output=True, timeout=5, check=True
+    )
+    lines = (tmp_path / "argv.txt").read_text().splitlines()
+    assert lines[0] == "ELSEWHERE"
+    assert lines[1] == "--system-prompt-file"
+
+
 @pytest.mark.skipif(not INSTALLED.exists(), reason="no shim installed on this box")
 def test_the_installed_shim_matches_this_checkout():
     assert INSTALLED.read_text() == SHIM.read_text()
