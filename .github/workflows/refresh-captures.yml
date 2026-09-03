@@ -38,6 +38,18 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # without the PAT the fix below is dormant and looks landed, so the run
+      # says which token opened the PR rather than leaving the empty red run
+      # as the only signal
+      - name: Warn when the PR token is the default one
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          PAT: ${{ secrets.REFRESH_PAT }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::warning::REFRESH_PAT is unset: this PR is authored by github-actions[bot] and its ci run will not dispatch"
+          fi
+
       - name: Open PR on drift
         if: steps.drift.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
