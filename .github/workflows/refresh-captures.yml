@@ -42,8 +42,8 @@ jobs:
         if: steps.drift.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          # a PR opened with the default token dispatches no workflow runs, so
-          # ci reported an empty run as a failure on every refresh. with the
+          # ci on a bot-authored PR is held for approval, never dispatched, so
+          # every refresh PR carried an empty run reporting failure. with the
           # secret unset, the fallback leaves this step on the default token
           token: ${{ secrets.REFRESH_PAT || github.token }}
           branch: chore/refresh-captures
