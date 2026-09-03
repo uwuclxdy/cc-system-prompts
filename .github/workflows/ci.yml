@@ -22,4 +22,7 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
-      - run: shellcheck scripts/*.sh shim/claude
+      # pinned, not the runner's apt shellcheck: ubuntu-24.04 ships 0.9.0, which
+      # flags SC3013 and SC2015 that 0.11.0 does not, so an unpinned gate reds on
+      # a runner image bump alone
+      - run: docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 scripts/*.sh shim/claude
