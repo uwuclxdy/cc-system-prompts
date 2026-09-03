@@ -22,7 +22,15 @@ jobs:
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run pytest
-      # pinned, not the runner's apt shellcheck: ubuntu-24.04 ships 0.9.0, which
-      # flags SC3013 and SC2015 that 0.11.0 does not, so an unpinned gate reds on
-      # a runner image bump alone
-      - run: docker run --rm -v "$PWD:/mnt:ro" koalaman/shellcheck:v0.11.0 scripts/*.sh shim/claude
+      # pinned through .shellcheck-version, which the local commit gate reads
+      # too, so the two verdicts cannot drift: ubuntu-24.04 ships 0.9.0, which
+      # flags SC3013 and SC2015 that 0.11.0 does not, and an unpinned gate would
+      # red on a runner image bump alone
+      - name: shellcheck
+        run: |
+          ver=$(cat .shellcheck-version)
+          curl -fsSL -o "$RUNNER_TEMP/shellcheck.tar.xz" \
+            "https://github.com/koalaman/shellcheck/releases/download/${ver}/shellcheck-${ver}.linux.x86_64.tar.xz"
+          tar -xJf "$RUNNER_TEMP/shellcheck.tar.xz" -C "$RUNNER_TEMP" "shellcheck-${ver}/shellcheck"
+          "$RUNNER_TEMP/shellcheck-${ver}/shellcheck" --version
+          "$RUNNER_TEMP/shellcheck-${ver}/shellcheck" -- scripts/*.sh shim/claude
