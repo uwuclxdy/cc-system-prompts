@@ -19,7 +19,9 @@ real=$(
     for d in $PATH; do
         [ -n "$d" ] || d=.
         cand=$d/claude
-        [ -x "$cand" ] && [ -f "$cand" ] || continue
+        [ -f "$cand" ] || continue
+        [ -x "$cand" ] || continue
+        # shellcheck disable=SC3013 # only identity test that sees through a symlink without a fork
         [ "$cand" -ef "$self" ] && continue
         printf '%s\n' "$cand"
         break
