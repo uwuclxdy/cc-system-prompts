@@ -75,7 +75,8 @@ def seed_repo(workdir: str) -> None:
     drift at every machine boundary, which would flap forever between a local
     refresh and the daily one. Owning the repo fixes the block in place; its
     values are normalized away regardless, and an empty repo is enough
-    (MEASURED 2026-08-23, `git init` in a repo-free dir under /var/tmp).
+    (MEASURED 2026-08-23, `git init` in a repo-free dir under /var/tmp; the
+    block is cli-only since 2.1.265, so this buys the cli flavor).
 
     The identity is the same story one level down: claude writes the block's
     `Git user:` line only when git resolves one, so a box with a global identity
@@ -89,13 +90,18 @@ def seed_repo(workdir: str) -> None:
         )
 
 
-def validate_gitstatus(system: str) -> None:
-    """Guard the artifact of record: what `seed_repo` buys, both halves of it.
+def validate_gitstatus(system: str, mode: str) -> None:
+    """Guard the artifact of record: what `seed_repo` buys, cli flavor only.
 
-    A missing block, or a block without the identity line, means the seed did
-    not fully take, and the capture is then not comparable with one from any
-    other machine.
+    The sdk flavor stopped stamping the gitStatus block in 2.1.265 (MEASURED
+    2026-09-10: `claude -p` sends no block, the interactive flavor still does),
+    so a missing block there is stock shape and must reach `captures/` as a
+    drift diff, not die here. a cli capture without the block, or with the
+    block but no identity line, still means the seed did not fully take and the
+    capture is not comparable with one from any other machine.
     """
+    if mode != "cli":
+        return
     for marker in ("gitStatus:", "Git user:"):
         if marker not in system:
             raise RuntimeError(f"capture carries no {marker!r}; the workdir seed did not take")
@@ -315,7 +321,7 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
         system = extract_system(body)
         validate_identity(system, mode)
         validate_stock(system, custom_prompt_text())
-        validate_gitstatus(system)
+        validate_gitstatus(system, mode)
         return system
     finally:
         stop_recorder(server)

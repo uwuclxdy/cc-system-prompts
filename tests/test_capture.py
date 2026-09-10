@@ -75,23 +75,36 @@ def test_custom_prompt_text_reads_the_first_readable_candidate(tmp_path):
 
 
 SEEDED = "gitStatus: This is the git status at the start\nGit user: capture\n"
+BLOCKLESS = "preamble\n# Environment\nno git block at all\n"
 
 
-def test_validate_gitstatus_accepts_a_capture_that_carries_both_markers():
-    validate_gitstatus(f"preamble\n{SEEDED}")
+def test_validate_gitstatus_cli_accepts_a_capture_that_carries_both_markers():
+    validate_gitstatus(f"preamble\n{SEEDED}", "cli")
 
 
-def test_validate_gitstatus_rejects_a_capture_missing_the_block():
+def test_validate_gitstatus_cli_rejects_a_capture_missing_the_block():
     # whether the workdir lands in a repo is a property of TMPDIR, so a missing
     # block means the seed did not take and the capture is not comparable
     with pytest.raises(RuntimeError, match="gitStatus"):
-        validate_gitstatus("preamble\nno block here\n")
+        validate_gitstatus(BLOCKLESS, "cli")
 
 
-def test_validate_gitstatus_rejects_a_block_with_no_identity_line():
+def test_validate_gitstatus_cli_rejects_a_block_with_no_identity_line():
     # a box with a global git identity and a bare runner differ on this line alone
     with pytest.raises(RuntimeError, match="Git user"):
-        validate_gitstatus("preamble\ngitStatus: snapshot\nStatus:\n")
+        validate_gitstatus("preamble\ngitStatus: snapshot\nStatus:\n", "cli")
+
+
+def test_validate_gitstatus_sdk_accepts_a_capture_with_no_block():
+    # upstream 2.1.265 dropped the gitStatus block from the sdk flavor; its
+    # absence there is stock shape, not a failed seed
+    validate_gitstatus(BLOCKLESS, "sdk")
+
+
+def test_validate_gitstatus_sdk_accepts_a_capture_still_carrying_the_block():
+    # pins that the guard does not freeze upstream shape: a re-added block must
+    # surface as a drift diff, not as a validation failure
+    validate_gitstatus(f"preamble\n{SEEDED}", "sdk")
 
 
 def test_seed_repo_makes_the_workdir_its_own_repository(tmp_path):
@@ -140,20 +153,38 @@ def test_capture_model_returns_a_stock_capture(monkeypatch):
     assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk") == stock
 
 
-def test_capture_model_refuses_a_capture_with_no_gitstatus(monkeypatch):
+def test_capture_model_sdk_accepts_a_blockless_stock_capture(monkeypatch):
     # on this box TMPDIR sits under a checkout, so a dropped seed still yields a
-    # block and only a runner would notice; this pins the guard's own wiring
+    # block and only a runner would notice. pins that the sdk path lets
+    # blockless stock through: upstream 2.1.265 sends the sdk flavor with no
+    # gitStatus block at all, and that stock shape must reach write_capture
     from cc_prompts import capture as capture_mod
 
-    unseeded = f"{SDK_IDENTITY}.\n# Environment\n" + "x" * 5000
+    blockless = f"{SDK_IDENTITY}.\n# Environment\n" + "x" * 5000
+
+    def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": blockless}]})
+
+    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
+    assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk") == blockless
+
+
+def test_capture_model_refuses_a_blockless_cli_capture(monkeypatch):
+    # the seed's wiring check, cli side: cli still stamps the gitStatus block
+    # (MEASURED 2026-09-10 against 2.1.266), so a cli capture without it means
+    # the seed did not take
+    from cc_prompts import capture as capture_mod
+
+    unseeded = f"{CLI_IDENTITY}.\n# Environment\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": unseeded}]})
 
-    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "_run_interactive", fake_run)
     monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
     with pytest.raises(RuntimeError, match="gitStatus"):
-        capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk")
+        capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "cli")
 
 
 def test_write_capture_names_sdk_files_with_the_suffix(tmp_path):
