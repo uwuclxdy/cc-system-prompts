@@ -4,54 +4,68 @@ import subprocess
 import pytest
 
 from cc_prompts.capture import (
-    CLI_IDENTITY,
-    SDK_IDENTITY,
     _system_size,
     custom_prompt_text,
     extract_system,
     pick_request,
     seed_repo,
-    validate_gitstatus,
-    validate_identity,
+    validate_entrypoint,
     validate_stock,
     write_capture,
 )
 
 CUSTOM_LINE = "an option's text names the action you will take, not just the situation."
+# the billing stamp CC writes into the request's own system array, per flavor
+# (MEASURED 2026-09-13 against 2.1.266 and 2.1.268); `normalize` strips it
+# from the artifact
+CLI_HEADER = "x-anthropic-billing-header: cc_version=2.1.268.e0e; cc_entrypoint=cli;\n"
+SDK_HEADER = "x-anthropic-billing-header: cc_version=2.1.268.e0e; cc_entrypoint=sdk-cli;\n"
 
 
-def test_validate_identity_cli_accepts_the_cli_flavor():
-    validate_identity(f"preamble\n{CLI_IDENTITY}. More text.", "cli")
+def test_validate_entrypoint_cli_accepts_the_cli_stamp():
+    validate_entrypoint(f"{CLI_HEADER}preamble\nMore text.", "cli")
 
 
-def test_validate_identity_cli_rejects_the_sdk_flavor():
-    with pytest.raises(RuntimeError, match="cli identity"):
-        validate_identity(f"{SDK_IDENTITY}.", "cli")
+def test_validate_entrypoint_sdk_accepts_the_sdk_stamp():
+    validate_entrypoint(f"{SDK_HEADER}preamble\nMore text.", "sdk")
 
 
-def test_validate_identity_cli_rejects_text_with_no_identity_at_all():
-    with pytest.raises(RuntimeError, match="cli identity"):
-        validate_identity("You are an interactive agent that helps with tasks.", "cli")
+def test_validate_entrypoint_cli_rejects_the_sdk_stamp():
+    # the runner and the wire disagree: a cli spawn produced the `-p` flavor
+    with pytest.raises(RuntimeError, match="cc_entrypoint"):
+        validate_entrypoint(f"{SDK_HEADER}preamble\n", "cli")
 
 
-def test_validate_identity_sdk_accepts_the_sdk_flavor():
-    validate_identity(f"preamble\n{SDK_IDENTITY}. More text.", "sdk")
+def test_validate_entrypoint_sdk_rejects_the_cli_stamp():
+    with pytest.raises(RuntimeError, match="cc_entrypoint"):
+        validate_entrypoint(f"{CLI_HEADER}preamble\n", "sdk")
 
 
-def test_validate_identity_sdk_rejects_the_cli_flavor():
-    with pytest.raises(RuntimeError, match="sdk identity"):
-        validate_identity(f"{CLI_IDENTITY}.", "sdk")
+def test_validate_entrypoint_accepts_a_capture_with_no_stamp():
+    # a build that stopped writing the header cannot be discriminated; the
+    # capture is still a valid artifact and must reach `captures/` as a diff
+    validate_entrypoint("preamble\n# Environment\nMore text.\n", "cli")
+
+
+def test_validate_entrypoint_accepts_a_renamed_stamp():
+    # only the OTHER flavor's spelling refuses; an unknown value is a renamed
+    # vocabulary, not a disagreement
+    validate_entrypoint(
+        "x-anthropic-billing-header: cc_version=9.9.9.xxx; cc_entrypoint=terminal;\n", "cli"
+    )
 
 
 def test_validate_stock_rejects_a_capture_carrying_the_custom_prompt():
-    # `--system-prompt-file` keeps the identity line, so validate_identity passes a
-    # shim'd capture; only the body separates the two
+    # a shim'd spawn stamps the cli entrypoint like any other interactive one,
+    # so only the body separates a shim'd capture from a stock one
     with pytest.raises(RuntimeError, match="custom prompt"):
-        validate_stock(f"{CLI_IDENTITY}.\n{CUSTOM_LINE}\n", CUSTOM_LINE)
+        validate_stock(f"{CLI_HEADER}You are Claude Code.\n{CUSTOM_LINE}\n", CUSTOM_LINE)
 
 
 def test_validate_stock_accepts_a_stock_capture():
-    validate_stock(f"{CLI_IDENTITY}.\n# Environment\nplatform: linux\n", CUSTOM_LINE)
+    validate_stock(
+        f"{CLI_HEADER}You are Claude Code.\n# Environment\nplatform: linux\n", CUSTOM_LINE
+    )
 
 
 def test_validate_stock_ignores_short_custom_lines():
@@ -61,7 +75,7 @@ def test_validate_stock_ignores_short_custom_lines():
 
 
 def test_validate_stock_is_a_noop_when_the_custom_prompt_is_unreadable():
-    validate_stock(f"{CLI_IDENTITY}.\n{CUSTOM_LINE}\n", "")
+    validate_stock(f"{CLI_HEADER}You are Claude Code.\n{CUSTOM_LINE}\n", "")
 
 
 def test_custom_prompt_text_returns_empty_when_no_candidate_exists(tmp_path):
@@ -72,39 +86,6 @@ def test_custom_prompt_text_reads_the_first_readable_candidate(tmp_path):
     second = tmp_path / "second.md"
     second.write_text("body")
     assert custom_prompt_text((tmp_path / "absent.md", second)) == "body"
-
-
-SEEDED = "gitStatus: This is the git status at the start\nGit user: capture\n"
-BLOCKLESS = "preamble\n# Environment\nno git block at all\n"
-
-
-def test_validate_gitstatus_cli_accepts_a_capture_that_carries_both_markers():
-    validate_gitstatus(f"preamble\n{SEEDED}", "cli")
-
-
-def test_validate_gitstatus_cli_rejects_a_capture_missing_the_block():
-    # whether the workdir lands in a repo is a property of TMPDIR, so a missing
-    # block means the seed did not take and the capture is not comparable
-    with pytest.raises(RuntimeError, match="gitStatus"):
-        validate_gitstatus(BLOCKLESS, "cli")
-
-
-def test_validate_gitstatus_cli_rejects_a_block_with_no_identity_line():
-    # a box with a global git identity and a bare runner differ on this line alone
-    with pytest.raises(RuntimeError, match="Git user"):
-        validate_gitstatus("preamble\ngitStatus: snapshot\nStatus:\n", "cli")
-
-
-def test_validate_gitstatus_sdk_accepts_a_capture_with_no_block():
-    # upstream 2.1.265 dropped the gitStatus block from the sdk flavor; its
-    # absence there is stock shape, not a failed seed
-    validate_gitstatus(BLOCKLESS, "sdk")
-
-
-def test_validate_gitstatus_sdk_accepts_a_capture_still_carrying_the_block():
-    # pins that the guard does not freeze upstream shape: a re-added block must
-    # surface as a drift diff, not as a validation failure
-    validate_gitstatus(f"preamble\n{SEEDED}", "sdk")
 
 
 def test_seed_repo_makes_the_workdir_its_own_repository(tmp_path):
@@ -128,7 +109,7 @@ def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
     # would otherwise reach write_capture and land in `captures/`
     from cc_prompts import capture as capture_mod
 
-    shimd = f"{SDK_IDENTITY}.\n{CUSTOM_LINE}\ngitStatus: snapshot\nGit user: capture\n" + "x" * 5000
+    shimd = f"{SDK_HEADER}You are a Claude agent.\n{CUSTOM_LINE}\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": shimd}]})
@@ -139,11 +120,27 @@ def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
         capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk")
 
 
-def test_capture_model_returns_a_stock_capture(monkeypatch):
-    # the control: same call path, same scope, a body the guard must NOT refuse
+def test_capture_model_refuses_a_capture_of_the_wrong_flavor(monkeypatch):
+    # the wiring for the flavor guard: an sdk-mode capture whose wire stamp
+    # says the spawn was interactive must not reach write_capture
     from cc_prompts import capture as capture_mod
 
-    stock = f"{SDK_IDENTITY}.\n# Environment\ngitStatus: snapshot\nGit user: capture\n" + "x" * 5000
+    miswired = f"{CLI_HEADER}You are Claude Code.\n# Environment\n" + "x" * 5000
+
+    def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": miswired}]})
+
+    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
+    with pytest.raises(RuntimeError, match="cc_entrypoint"):
+        capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk")
+
+
+def test_capture_model_returns_a_stock_capture(monkeypatch):
+    # the control: same call path, same scope, a body the guards must NOT refuse
+    from cc_prompts import capture as capture_mod
+
+    stock = f"{SDK_HEADER}You are a Claude agent.\n# Environment\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": stock}]})
@@ -153,38 +150,43 @@ def test_capture_model_returns_a_stock_capture(monkeypatch):
     assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk") == stock
 
 
-def test_capture_model_sdk_accepts_a_blockless_stock_capture(monkeypatch):
-    # on this box TMPDIR sits under a checkout, so a dropped seed still yields a
-    # block and only a runner would notice. pins that the sdk path lets
-    # blockless stock through: upstream 2.1.265 sends the sdk flavor with no
-    # gitStatus block at all, and that stock shape must reach write_capture
+def test_capture_model_cli_accepts_the_blockless_2_1_268_shape(monkeypatch):
+    # the shape that reddened the daily runs: CC 2.1.268's cli prompt carries no
+    # gitStatus block and no machine-context lines (MEASURED 2026-09-13 against
+    # the checksum-verified binary); it is a valid stock artifact and must land
+    # as a drift diff, not die in a guard
     from cc_prompts import capture as capture_mod
 
-    blockless = f"{SDK_IDENTITY}.\n# Environment\n" + "x" * 5000
+    blockless = (
+        f"{CLI_HEADER}You are Claude Code, Anthropic's official CLI for Claude.\n"
+        "# Environment\n - The most recent Claude models are the Claude 5 family.\n" + "x" * 5000
+    )
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
         server.requests.append({"model": model_id, "system": [{"type": "text", "text": blockless}]})
 
-    monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
+    monkeypatch.setattr(capture_mod, "_run_interactive", fake_run)
     monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
-    assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "sdk") == blockless
+    assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "cli") == blockless
 
 
-def test_capture_model_refuses_a_blockless_cli_capture(monkeypatch):
-    # the seed's wiring check, cli side: cli still stamps the gitStatus block
-    # (MEASURED 2026-09-10 against 2.1.266), so a cli capture without it means
-    # the seed did not take
+def test_capture_model_cli_accepts_a_prompt_with_no_identity_line(monkeypatch):
+    # the class, not the instance: the identity line is tracked prose like any
+    # other line, so a future release rewording or dropping it must not refuse
+    # the capture either
     from cc_prompts import capture as capture_mod
 
-    unseeded = f"{CLI_IDENTITY}.\n# Environment\n" + "x" * 5000
+    wordless = (
+        "x-anthropic-billing-header: cc_version=9.9.9.xxx; cc_entrypoint=cli;\n"
+        "# Environment\n - Some future shape of the prompt.\n" + "x" * 5000
+    )
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
-        server.requests.append({"model": model_id, "system": [{"type": "text", "text": unseeded}]})
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": wordless}]})
 
     monkeypatch.setattr(capture_mod, "_run_interactive", fake_run)
     monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)
-    with pytest.raises(RuntimeError, match="gitStatus"):
-        capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "cli")
+    assert capture_mod.capture_model("/nonexistent/claude", "claude-opus-5", "cli") == wordless
 
 
 def test_write_capture_names_sdk_files_with_the_suffix(tmp_path):

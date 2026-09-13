@@ -47,64 +47,55 @@ BOOT_WAIT = 4.0
 INPUT_WAIT = 1.0
 # conversation prompts run ~20k+ chars; startup helpers stay far below
 MIN_SYSTEM_SIZE = 1000
-CLI_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude"
-SDK_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK"
+# the spawn's own verdict on the wire: CC writes a billing header into the
+# request's system array and `normalize` strips it from the artifact (MEASURED
+# 2026-09-13 against 2.1.266 and 2.1.268: the interactive flavor stamps `cli`,
+# the `-p` flavor `sdk-cli`)
+MODE_ENTRYPOINT = {"cli": "cli", "sdk": "sdk-cli"}
+_ENTRYPOINT = re.compile(r"\bcc_entrypoint=([^;\s]+)")
 
-MODE_IDENTITY = {"cli": CLI_IDENTITY, "sdk": SDK_IDENTITY}
 
-
-def validate_identity(system: str, mode: str) -> None:
+def validate_entrypoint(system: str, mode: str) -> None:
     """Guard the artifact of record: the prompt flavor the mode asks for.
 
-    The spawn shape decides the identity line (interactive -> cli, `-p` ->
-    sdk); a capture carrying the other flavor means the runner and the wire
-    disagree. fail fast rather than publish the wrong prompt.
+    Keyed on the billing stamp CC itself writes, never on prompt prose: the
+    prose is the tracked variable, so a reworded identity line or a dropped
+    block is drift that must reach `captures/` as a diff, not die here. Only a
+    stamp positively naming the other flavor means the runner and the wire
+    disagree; a missing or renamed stamp cannot discriminate and passes.
     """
-    if MODE_IDENTITY[mode] not in system:
+    stamped = _ENTRYPOINT.search(system)
+    if stamped is None:
+        return
+    other = next(value for key, value in MODE_ENTRYPOINT.items() if key != mode)
+    if stamped.group(1) == other:
         raise RuntimeError(
-            f"capture lacks the {mode} identity line; the spawn was probably the other flavor"
+            f"capture's cc_entrypoint stamp is {stamped.group(1)!r}, the other flavor's; "
+            f"the {mode} spawn was probably wired wrong"
         )
 
 
 def seed_repo(workdir: str) -> None:
     """Make the capture's working directory a git repository of its own.
 
-    claude stamps a `gitStatus:` block only from inside a repo, and whether the
-    temp workdir lands in one is a property of `TMPDIR`: `/mnt/scratch/tmp` sits
-    under a checkout, a CI runner's does not. That turned the whole block into
-    drift at every machine boundary, which would flap forever between a local
-    refresh and the daily one. Owning the repo fixes the block in place; its
-    values are normalized away regardless, and an empty repo is enough
-    (MEASURED 2026-08-23, `git init` in a repo-free dir under /var/tmp; the
-    block is cli-only since 2.1.265, so this buys the cli flavor).
+    Through 2.1.267 the prompt derived lines from the workdir's repo (the
+    `gitStatus:` block, `Is a git repository:`), and whether the temp workdir
+    landed in one is a property of `TMPDIR`: `/mnt/scratch/tmp` sits under a
+    checkout, a CI runner's does not. That turned the whole block into drift at
+    every machine boundary, which would flap forever between a local refresh
+    and the daily one. Owning the repo fixed those values in place; 2.1.268
+    stamps no repo state at all (MEASURED 2026-09-13), and the seed stays as
+    the determinism mechanism for any version that derives from the repo again.
 
-    The identity is the same story one level down: claude writes the block's
-    `Git user:` line only when git resolves one, so a box with a global identity
-    and a bare runner disagree on that line alone. A local identity in the
-    throwaway repo settles it and touches no config outside `workdir`.
+    The local identity was the same story one level down: the block's
+    `Git user:` line appeared only when git resolved one, so a throwaway-repo
+    identity settled it, touching no config outside `workdir`.
     """
     subprocess.run(["git", "init", "-q", workdir], check=True, capture_output=True)
     for key, value in (("user.name", "capture"), ("user.email", "capture@example.invalid")):
         subprocess.run(
             ["git", "-C", workdir, "config", key, value], check=True, capture_output=True
         )
-
-
-def validate_gitstatus(system: str, mode: str) -> None:
-    """Guard the artifact of record: what `seed_repo` buys, cli flavor only.
-
-    The sdk flavor stopped stamping the gitStatus block in 2.1.265 (MEASURED
-    2026-09-10: `claude -p` sends no block, the interactive flavor still does),
-    so a missing block there is stock shape and must reach `captures/` as a
-    drift diff, not die here. a cli capture without the block, or with the
-    block but no identity line, still means the seed did not fully take and the
-    capture is not comparable with one from any other machine.
-    """
-    if mode != "cli":
-        return
-    for marker in ("gitStatus:", "Git user:"):
-        if marker not in system:
-            raise RuntimeError(f"capture carries no {marker!r}; the workdir seed did not take")
 
 
 def custom_prompt_text(paths: tuple[Path, ...] = CUSTOM_PROMPT_PATHS) -> str:
@@ -129,12 +120,12 @@ def custom_markers(system: str, custom: str) -> list[str]:
 def validate_stock(system: str, custom: str) -> None:
     """Guard the artifact of record: a capture must carry the STOCK prompt.
 
-    `--system-prompt-file` replaces the whole stock prose and leaves the identity
-    line standing, so `validate_identity` passes a shim'd capture unchanged. The
-    custom prompt is identity-bearing and `captures/` gets pushed, so match on
-    content: a renamed shim, or a `--claude-bin` pointing anywhere else, still
-    spells its own bytes into the capture. Inert when `custom` is empty, which is
-    the CI case, where no shim exists to guard against.
+    A shim'd spawn stamps the cli entrypoint like any other interactive one, so
+    `validate_entrypoint` passes a shim'd capture unchanged. The custom prompt
+    is identity-bearing and `captures/` gets pushed, so match on content: a
+    renamed shim, or a `--claude-bin` pointing anywhere else, still spells its
+    own bytes into the capture. Inert when `custom` is empty, which is the CI
+    case, where no shim exists to guard against.
     """
     found = custom_markers(system, custom)
     if found:
@@ -319,9 +310,8 @@ def capture_model(binary: str, model_id: str, mode: str) -> str:
         if body is None:
             raise RuntimeError(f"no request with a system reached the recorder for {model_id}")
         system = extract_system(body)
-        validate_identity(system, mode)
+        validate_entrypoint(system, mode)
         validate_stock(system, custom_prompt_text())
-        validate_gitstatus(system, mode)
         return system
     finally:
         stop_recorder(server)
