@@ -163,6 +163,8 @@ def _run_probe(
     workdir: str,
     base_url: str,
     server: RecorderServer,
+    extra_env: dict[str, str] | None,
+    no_dummy_keys: bool,
 ) -> None:
     for use_flag in (True, False):
         runner = runner_for(mode)
@@ -176,6 +178,8 @@ def _run_probe(
             server,
             ready=has_subagent_request,
             timeout=PROBE_TIMEOUT,
+            extra_env=extra_env,
+            no_dummy_keys=no_dummy_keys,
         )
         if has_subagent_request(server):
             break
@@ -189,6 +193,8 @@ def capture_pair(
     *,
     config_dir: str | None = None,
     workdir: str | None = None,
+    extra_env: dict[str, str] | None = None,
+    no_dummy_keys: bool = False,
 ) -> tuple[str, str]:
     """Return the parent's system prompt and its subagent's, from one spawn.
 
@@ -204,9 +210,29 @@ def capture_pair(
     try:
         if config_dir is None:
             with capture_workspace() as (workdir, config_dir):
-                _run_probe(binary, model_id, mode, config_dir, workdir, base_url, server)
+                _run_probe(
+                    binary,
+                    model_id,
+                    mode,
+                    config_dir,
+                    workdir,
+                    base_url,
+                    server,
+                    extra_env,
+                    no_dummy_keys,
+                )
         else:
-            _run_probe(binary, model_id, mode, config_dir, workdir, base_url, server)
+            _run_probe(
+                binary,
+                model_id,
+                mode,
+                config_dir,
+                workdir,
+                base_url,
+                server,
+                extra_env,
+                no_dummy_keys,
+            )
         if responder.tools_seen and not responder.fired:
             raise RuntimeError(
                 f"no tool named any of {AGENT_TOOL_NAMES} in this build; "
@@ -247,7 +273,32 @@ def main(argv: list[str] | None = None) -> int:
         "(needs --config-dir too)",
     )
     parser.add_argument("--out", type=Path, help="write the normalized subagent prompt here")
+    parser.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="force an env var into the spawned claude after the ambient scrub; repeatable",
+    )
+    parser.add_argument(
+        "--no-dummy-keys",
+        action="store_true",
+        help="use the config's stored credentials instead of the dummy env keys",
+    )
     args = parser.parse_args(argv)
+
+    if args.no_dummy_keys and args.config_dir is None:
+        # the throwaway workspace stores no credentials, so the flag alone
+        # could never do what its help says
+        parser.error("--no-dummy-keys needs --config-dir")
+    extra_env: dict[str, str] = {}
+    for pair in args.env:
+        key, sep, value = pair.partition("=")
+        if not sep or not key:
+            # an empty key would stall the cli spawn into its timeout with a
+            # misleading failure, or silently vanish from the sdk spawn's env
+            parser.error(f"--env needs KEY=VALUE, got {pair!r}")
+        extra_env[key] = value
 
     custom = custom_prompt_text()
     parent, subagent = capture_pair(
@@ -257,6 +308,8 @@ def main(argv: list[str] | None = None) -> int:
         args.subagent_type,
         config_dir=args.config_dir,
         workdir=args.workdir,
+        extra_env=extra_env or None,
+        no_dummy_keys=args.no_dummy_keys,
     )
     in_parent = custom_markers(parent, custom)
     in_subagent = custom_markers(subagent, custom)

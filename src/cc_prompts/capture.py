@@ -171,7 +171,14 @@ def extract_system(body: dict) -> str:
     return "\n".join(block.get("text", "") for block in system)
 
 
-def _spawn_env(config_dir: str, base_url: str, model_id: str, use_flag: bool) -> dict[str, str]:
+def _spawn_env(
+    config_dir: str,
+    base_url: str,
+    model_id: str,
+    use_flag: bool,
+    extra_env: dict[str, str] | None = None,
+    no_dummy_keys: bool = False,
+) -> dict[str, str]:
     # ambient CLAUDE_*/ANTHROPIC_* from the parent leaks into the child and
     # fires stray requests for other models; scrub them all and set our own
     env = {
@@ -190,6 +197,15 @@ def _spawn_env(config_dir: str, base_url: str, model_id: str, use_flag: bool) ->
     else:
         # --model rejected client-side: the env var is the fallback transport
         env |= {"ANTHROPIC_MODEL": model_id}
+    if no_dummy_keys:
+        # let the config's stored credentials answer, so a gate only real
+        # credentials pass (the OAuth one behind the scratchpad block) can fire
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("ANTHROPIC_AUTH_TOKEN", None)
+    if extra_env:
+        # a probe trigger rides a CLAUDE_*/ANTHROPIC_* var the scrub would
+        # drop, so --env applies after it
+        env |= extra_env
     return env
 
 
@@ -207,8 +223,10 @@ def _run_interactive(
     server: RecorderServer,
     ready: Callable[[RecorderServer], bool] = has_conversation_request,
     timeout: float = ATTEMPT_TIMEOUT,
+    extra_env: dict[str, str] | None = None,
+    no_dummy_keys: bool = False,
 ) -> None:
-    env = _spawn_env(config_dir, base_url, model_id, use_flag)
+    env = _spawn_env(config_dir, base_url, model_id, use_flag, extra_env, no_dummy_keys)
     args = [binary]
     if use_flag:
         args += ["--model", model_id]
@@ -256,9 +274,11 @@ def _run_sdk(
     server: RecorderServer,
     ready: Callable[[RecorderServer], bool] = has_conversation_request,
     timeout: float = ATTEMPT_TIMEOUT,
+    extra_env: dict[str, str] | None = None,
+    no_dummy_keys: bool = False,
 ) -> None:
     del server, ready  # the subprocess exits on its own; the recorder keeps the body
-    env = _spawn_env(config_dir, base_url, model_id, use_flag)
+    env = _spawn_env(config_dir, base_url, model_id, use_flag, extra_env, no_dummy_keys)
     cmd = [binary, "-p", "hi"]
     if use_flag:
         cmd += ["--model", model_id]

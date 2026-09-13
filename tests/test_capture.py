@@ -238,3 +238,53 @@ def test_extract_system_joins_blocks_and_handles_plain_string():
     assert extract_system(real_body()) == "billing block\n" + "x" * 5000
     assert extract_system({"system": "plain"}) == "plain"
     assert extract_system({}) == ""
+
+
+def test_spawn_env_sets_dummy_credentials_by_default():
+    from cc_prompts import capture as capture_mod
+
+    env = capture_mod._spawn_env("/tmp/cfg", "http://127.0.0.1:1", "claude-opus-5", True)
+    assert env["ANTHROPIC_API_KEY"] == "dummy"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "dummy"
+
+
+def test_spawn_env_applies_extra_env_after_the_scrub(monkeypatch):
+    # a probe trigger rides a CLAUDE_* var the scrub would drop; --env re-sets it
+    from cc_prompts import capture as capture_mod
+
+    monkeypatch.setenv("CLAUDE_CODE_ARTIFACT", "ambient")
+    env = capture_mod._spawn_env(
+        "/tmp/cfg",
+        "http://127.0.0.1:1",
+        "claude-opus-5",
+        True,
+        extra_env={"CLAUDE_CODE_ARTIFACT": "1"},
+    )
+    assert env["CLAUDE_CODE_ARTIFACT"] == "1"
+
+
+def test_spawn_env_no_dummy_keys_drops_the_dummy_credentials():
+    from cc_prompts import capture as capture_mod
+
+    env = capture_mod._spawn_env(
+        "/tmp/cfg", "http://127.0.0.1:1", "claude-opus-5", False, no_dummy_keys=True
+    )
+    assert "ANTHROPIC_API_KEY" not in env
+    assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
+def test_spawn_env_extra_env_survives_no_dummy_keys_when_naming_a_credential_var():
+    # --env applies after the dummy-key pop, so a deliberate ANTHROPIC_* var
+    # survives both the scrub and the pop
+    from cc_prompts import capture as capture_mod
+
+    env = capture_mod._spawn_env(
+        "/tmp/cfg",
+        "http://127.0.0.1:1",
+        "claude-opus-5",
+        False,
+        extra_env={"ANTHROPIC_API_KEY": "real"},
+        no_dummy_keys=True,
+    )
+    assert env["ANTHROPIC_API_KEY"] == "real"
+    assert "ANTHROPIC_AUTH_TOKEN" not in env

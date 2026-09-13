@@ -199,3 +199,133 @@ def test_capture_pair_drives_the_given_workspace(monkeypatch):
 
     assert calls == [("/tmp/cfg", "/tmp/wd")]
     assert (parent, subagent) == ("parent\n", "subagent\n")
+
+
+def test_capture_pair_threads_env_and_dummy_key_choice_to_the_runner(monkeypatch):
+    import cc_prompts.subagent as mod
+
+    calls = []
+
+    def fake_runner(binary, model_id, config_dir, workdir, base_url, use_flag, server, **kwargs):
+        calls.append(kwargs)
+
+    def boom():
+        raise AssertionError("the probe must not create a throwaway workspace")
+
+    monkeypatch.setattr(mod, "runner_for", lambda mode: fake_runner)
+    monkeypatch.setattr(mod, "has_subagent_request", lambda server: True)
+    monkeypatch.setattr(mod, "pick_parent_request", lambda requests: "parent\n")
+    monkeypatch.setattr(mod, "pick_subagent_request", lambda requests: "subagent\n")
+    monkeypatch.setattr(mod, "extract_system", lambda system: system)
+    monkeypatch.setattr(mod, "capture_workspace", boom)
+
+    capture_pair(
+        "claude",
+        "model",
+        "cli",
+        config_dir="/tmp/cfg",
+        workdir="/tmp/wd",
+        extra_env={"CLAUDE_CODE_ARTIFACT": "1"},
+        no_dummy_keys=True,
+    )
+
+    assert calls == [
+        {
+            "ready": mod.has_subagent_request,
+            "timeout": mod.PROBE_TIMEOUT,
+            "extra_env": {"CLAUDE_CODE_ARTIFACT": "1"},
+            "no_dummy_keys": True,
+        }
+    ]
+
+
+def test_main_threads_env_pairs_and_the_dummy_key_choice_to_capture_pair(monkeypatch, capsys):
+    from cc_prompts import subagent as mod
+
+    calls = {}
+
+    def fake_capture_pair(binary, model_id, mode, subagent_type, **kwargs):
+        calls.update(kwargs)
+        return "parent\n", "subagent\n"
+
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
+    monkeypatch.setattr(mod, "capture_pair", fake_capture_pair)
+    assert (
+        main(
+            [
+                "--env",
+                "CLAUDE_CODE_ARTIFACT=1",
+                "--no-dummy-keys",
+                "--config-dir",
+                "/tmp/cfg",
+                "--workdir",
+                "/tmp/wd",
+            ]
+        )
+        == 0
+    )
+    assert calls == {
+        "config_dir": "/tmp/cfg",
+        "workdir": "/tmp/wd",
+        "extra_env": {"CLAUDE_CODE_ARTIFACT": "1"},
+        "no_dummy_keys": True,
+    }
+    assert capsys.readouterr().err == ""
+
+
+def test_main_rejects_a_malformed_env_pair(monkeypatch, capsys):
+    from cc_prompts import subagent as mod
+
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
+    with pytest.raises(SystemExit) as err:
+        main(["--env", "NOEQUALS"])
+    assert err.value.code == 2
+    assert "KEY=VALUE" in capsys.readouterr().err
+
+
+def test_main_rejects_an_empty_env_key(monkeypatch, capsys):
+    # an empty key would stall the cli spawn into its timeout with a
+    # misleading failure, or silently vanish from the sdk spawn's env
+    from cc_prompts import subagent as mod
+
+    def boom(*args, **kwargs):
+        raise AssertionError("an empty env key must never reach the probe")
+
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
+    monkeypatch.setattr(mod, "capture_pair", boom)
+    with pytest.raises(SystemExit) as err:
+        main(["--env", "=v"])
+    assert err.value.code == 2
+    assert "KEY=VALUE" in capsys.readouterr().err
+
+
+def test_main_threads_a_value_containing_equals(monkeypatch):
+    # the pair splits at the first "=" only, so a value may carry its own
+    from cc_prompts import subagent as mod
+
+    calls = {}
+
+    def fake_capture_pair(binary, model_id, mode, subagent_type, **kwargs):
+        calls.update(kwargs)
+        return "parent\n", "subagent\n"
+
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
+    monkeypatch.setattr(mod, "capture_pair", fake_capture_pair)
+    assert main(["--env", "CLAUDE_CODE_ARTIFACT=1=x"]) == 0
+    assert calls["extra_env"] == {"CLAUDE_CODE_ARTIFACT": "1=x"}
+
+
+def test_main_refuses_no_dummy_keys_without_a_config_dir(monkeypatch, capsys):
+    # the throwaway workspace stores no credentials, so the flag alone could
+    # never do what its help says
+    from cc_prompts import subagent as mod
+
+    def boom(*args, **kwargs):
+        raise AssertionError("--no-dummy-keys without --config-dir must be refused")
+
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
+    monkeypatch.setattr(mod, "capture_pair", boom)
+    with pytest.raises(SystemExit) as err:
+        main(["--no-dummy-keys"])
+    assert err.value.code == 2
+    assert "--config-dir" in capsys.readouterr().err
