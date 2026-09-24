@@ -248,6 +248,111 @@ def test_spawn_env_sets_dummy_credentials_by_default():
     assert env["ANTHROPIC_AUTH_TOKEN"] == "dummy"
 
 
+def test_spawn_env_keeps_the_spawn_off_the_updater_and_the_users_gh(monkeypatch):
+    from cc_prompts import capture as capture_mod
+
+    gh_tokens = {"GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"}
+    monkeypatch.setenv("DISABLE_AUTOUPDATER", "0")
+    for var in gh_tokens:
+        monkeypatch.setenv(var, "ambient")
+    env = capture_mod._spawn_env("/tmp/cfg", "http://127.0.0.1:1", "claude-opus-5", True)
+    assert env["DISABLE_AUTOUPDATER"] == "1"
+    assert env["GH_CONFIG_DIR"] == "/tmp/cfg/gh"
+    assert env["DBUS_SESSION_BUS_ADDRESS"] == "unix:path=/tmp/cfg/no-session-bus"
+    assert gh_tokens & env.keys() == set()
+
+
+def _two_versions(tmp_path):
+    versions = tmp_path / "versions"
+    versions.mkdir()
+    first, second = versions / "2.1.282", versions / "2.1.283"
+    for binary in (first, second):
+        binary.write_text("")
+        binary.chmod(0o755)
+    launcher = tmp_path / "claude"
+    launcher.symlink_to(first)
+    return launcher, first, second
+
+
+def test_main_captures_every_model_on_the_binary_the_launcher_names_at_start(monkeypatch, tmp_path):
+    from cc_prompts import capture as capture_mod
+
+    launcher, first, second = _two_versions(tmp_path)
+    seen: list[str] = []
+
+    def spawn(binary, model_id, mode):
+        # an update elsewhere on the box repoints the launcher mid-run
+        seen.append(binary)
+        launcher.unlink()
+        launcher.symlink_to(second)
+        return "x-anthropic-billing-header: cc_version=2.1.282.1; cc_entrypoint=cli;\nstock"
+
+    monkeypatch.setattr(
+        capture_mod, "claude_version", lambda binary: seen.append(binary) or "2.1.282"
+    )
+    monkeypatch.setattr(capture_mod, "capture_model", spawn)
+    argv = ["--claude-bin", str(launcher), "--models", "opus", "haiku", "--mode", "cli"]
+    assert capture_mod.main([*argv, "--out", str(tmp_path / "out")]) == 0
+    assert set(seen) == {str(first.resolve())}
+    assert len(seen) == 3
+
+
+def test_main_refuses_a_capture_stamped_with_another_version(monkeypatch, tmp_path):
+    from cc_prompts import capture as capture_mod
+
+    monkeypatch.setattr(capture_mod, "claude_version", lambda binary: "2.1.282")
+    monkeypatch.setattr(
+        capture_mod,
+        "capture_model",
+        lambda binary, model_id, mode: (
+            "x-anthropic-billing-header: cc_version=2.1.283.7; cc_entrypoint=cli;\nstock"
+        ),
+    )
+    out = tmp_path / "out"
+    argv = ["--claude-bin", "/bin/sh", "--models", "opus", "--mode", "cli", "--out", str(out)]
+    assert capture_mod.main(argv) == 1
+    assert not (out / "opus.md").exists()
+
+
+def test_validate_version_accepts_a_matching_or_missing_stamp():
+    from cc_prompts import capture as capture_mod
+
+    capture_mod.validate_version("x-anthropic-billing-header: cc_version=2.1.282.132;", "2.1.282")
+    capture_mod.validate_version("no billing header at all", "2.1.282")
+
+
+def test_validate_version_rejects_another_release():
+    from cc_prompts import capture as capture_mod
+
+    with pytest.raises(RuntimeError, match=r"'2\.1\.283'.*'2\.1\.282'"):
+        capture_mod.validate_version("x-anthropic-billing-header: cc_version=2.1.283.7;", "2.1.282")
+
+
+def test_main_resolves_a_bare_launcher_name_on_path(monkeypatch, tmp_path):
+    from cc_prompts import capture as capture_mod
+
+    launcher, first, _ = _two_versions(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    seen: list[str] = []
+    monkeypatch.setattr(
+        capture_mod, "claude_version", lambda binary: seen.append(binary) or "2.1.282"
+    )
+    monkeypatch.setattr(capture_mod, "capture_model", lambda binary, model_id, mode: "stock")
+    argv = ["--claude-bin", "claude", "--models", "opus", "--mode", "cli"]
+    assert capture_mod.main([*argv, "--out", str(tmp_path / "out")]) == 0
+    assert seen == [str(first.resolve())]
+
+
+def test_main_refuses_a_launcher_it_cannot_find(monkeypatch, tmp_path, capsys):
+    from cc_prompts import capture as capture_mod
+
+    monkeypatch.setenv("PATH", str(tmp_path))
+    with pytest.raises(SystemExit) as exit_info:
+        capture_mod.main(["--claude-bin", "no-such-claude", "--out", str(tmp_path / "out")])
+    assert exit_info.value.code == 2
+    assert "no-such-claude" in capsys.readouterr().err
+
+
 def test_spawn_env_applies_extra_env_after_the_scrub(monkeypatch):
     # a probe trigger rides a CLAUDE_* var the scrub would drop; --env re-sets it
     from cc_prompts import capture as capture_mod

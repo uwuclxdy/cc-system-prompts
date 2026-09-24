@@ -170,6 +170,31 @@ def test_main_refuses_to_write_a_capture_that_leaked_the_custom_prompt(
     assert not target.exists()
 
 
+def test_main_spawns_the_pinned_binary_and_records_the_stamped_version(monkeypatch, tmp_path):
+    from cc_prompts import subagent as mod
+
+    real = tmp_path / "versions" / "2.1.282"
+    real.parent.mkdir()
+    real.write_text("")
+    real.chmod(0o755)
+    launcher = tmp_path / "claude"
+    launcher.symlink_to(real)
+    spawned: list[str] = []
+    monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
+    monkeypatch.setattr(mod, "claude_version", lambda binary: "2.1.282")
+    stamped = "x-anthropic-billing-header: cc_version=2.1.283.4; cc_is_subagent=true;\nsub\n"
+    monkeypatch.setattr(
+        mod,
+        "capture_pair",
+        lambda binary, *a, **k: spawned.append(binary) or ("parent\n", stamped),
+    )
+    out = tmp_path / "out" / "subagent.md"
+    assert main(["--claude-bin", str(launcher), "--out", str(out)]) == 0
+    assert spawned == [str(real.resolve())]
+    # the version on record is the one the subagent's own request stamped
+    assert json.loads((out.parent / "meta.json").read_text())["version"] == "2.1.283"
+
+
 def test_capture_pair_refuses_half_a_workspace():
     with pytest.raises(RuntimeError, match="both config_dir and workdir"):
         capture_pair("claude", "model", "cli", config_dir="/tmp/cfg")

@@ -29,7 +29,9 @@ from .capture import (
     custom_prompt_text,
     extract_system,
     pick_request,
+    pin_launcher,
     runner_for,
+    stamped_version,
 )
 from .meta import record_capture
 from .normalize import normalize
@@ -301,8 +303,13 @@ def main(argv: list[str] | None = None) -> int:
         extra_env[key] = value
 
     custom = custom_prompt_text()
+    # an update elsewhere on the box repoints the launcher, so the run spawns
+    # the binary it names now
+    binary = pin_launcher(args.claude_bin)
+    if binary is None:
+        parser.error(f"no launcher at {args.claude_bin!r}")
     parent, subagent = capture_pair(
-        args.claude_bin,
+        binary,
         MODELS[args.model],
         args.mode,
         args.subagent_type,
@@ -322,7 +329,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"LEAK: the custom prompt reaches the subagent ({in_subagent[0][:50]!r})")
         return 1
     if args.out:
-        version = claude_version(args.claude_bin)
+        # the release the subagent's own request stamped; a wrapper launcher
+        # picks its binary per run, so no version read beside the spawn can name it
+        version = stamped_version(subagent) or claude_version(binary)
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(normalize(subagent) + "\n")
         record_capture(args.out.parent, args.out.name, MODELS[args.model], version, "subagent")

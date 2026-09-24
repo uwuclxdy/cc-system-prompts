@@ -13,6 +13,7 @@ import json
 import os
 import pty
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -53,6 +54,10 @@ MIN_SYSTEM_SIZE = 1000
 # the `-p` flavor `sdk-cli`)
 MODE_ENTRYPOINT = {"cli": "cli", "sdk": "sdk-cli"}
 _ENTRYPOINT = re.compile(r"\bcc_entrypoint=([^;\s]+)")
+_STAMPED_VERSION = re.compile(r"\bcc_version=(\d+\.\d+\.\d+)")
+GH_TOKEN_VARS = frozenset(
+    ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN")
+)
 
 
 def validate_entrypoint(system: str, mode: str) -> None:
@@ -73,6 +78,34 @@ def validate_entrypoint(system: str, mode: str) -> None:
             f"capture's cc_entrypoint stamp is {stamped.group(1)!r}, the other flavor's; "
             f"the {mode} spawn was probably wired wrong"
         )
+
+
+def stamped_version(system: str) -> str | None:
+    """The release CC stamped into the request's own billing header, if any."""
+    stamped = _STAMPED_VERSION.search(system)
+    return stamped.group(1) if stamped else None
+
+
+def validate_version(system: str, version: str) -> None:
+    """Guard the sidecar: every capture of a run comes from the version it records.
+
+    Keyed on the release CC stamps into its own billing header, never on the
+    launcher: an update elsewhere on the box repoints a launcher mid-run, and a
+    wrapper picks its binary on every run, so the binary a spawn ran is one
+    `claude --version` never asked. A missing stamp cannot discriminate and passes.
+    """
+    stamped = stamped_version(system)
+    if stamped is not None and stamped != version:
+        raise RuntimeError(
+            f"capture's cc_version stamp is {stamped!r}, the run records {version!r}; "
+            "the launcher changed binaries mid-run"
+        )
+
+
+def pin_launcher(launcher: str) -> str | None:
+    """The binary a launcher names right now: looked up on PATH, then resolved."""
+    found = shutil.which(launcher)
+    return os.path.realpath(found) if found else None
 
 
 def seed_repo(workdir: str) -> None:
@@ -183,17 +216,24 @@ def _spawn_env(
     no_dummy_keys: bool = False,
 ) -> dict[str, str]:
     # ambient CLAUDE_*/ANTHROPIC_* from the parent leaks into the child and
-    # fires stray requests for other models; scrub them all and set our own
+    # fires stray requests for other models; scrub them all and set our own.
+    # the spawn also runs `gh auth token` and `gh issue list --author @me`; with
+    # no gh config, no gh token and no session bus (gh's keyring) it runs logged out
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("CLAUDE_", "ANTHROPIC_"))
+        if not key.startswith(("CLAUDE_", "ANTHROPIC_")) and key not in GH_TOKEN_VARS
     } | {
         "CLAUDE_CONFIG_DIR": config_dir,
         "ANTHROPIC_BASE_URL": base_url,
         "ANTHROPIC_API_KEY": "dummy",
         "ANTHROPIC_AUTH_TOKEN": "dummy",
         "TERM": "xterm-256color",
+        # a spawn's self-update installs a release and repoints the user's
+        # launcher under every live session; a capture never touches the install
+        "DISABLE_AUTOUPDATER": "1",
+        "GH_CONFIG_DIR": os.path.join(config_dir, "gh"),
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=" + os.path.join(config_dir, "no-session-bus"),
     }
     if use_flag:
         env.pop("ANTHROPIC_MODEL", None)
@@ -372,13 +412,19 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"unknown models: {', '.join(unknown)}")
 
     modes = ("cli", "sdk") if args.mode == "both" else (args.mode,)
-    version = claude_version(args.claude_bin)
+    # an update elsewhere on the box repoints the launcher, so the run spawns
+    # the binary it names now; validate_version catches a wrapper that picks its own
+    binary = pin_launcher(args.claude_bin)
+    if binary is None:
+        parser.error(f"no launcher at {args.claude_bin!r}")
+    version = claude_version(binary)
     failures: list[str] = []
     for name in args.models:
         model_id = MODELS[name]
         for mode in modes:
             try:
-                text = capture_model(args.claude_bin, model_id, mode)
+                text = capture_model(binary, model_id, mode)
+                validate_version(text, version)
             except RuntimeError as err:
                 print(f"FAIL {mode} {name}: {err}", file=sys.stderr)
                 failures.append(f"{mode} {name}")
