@@ -83,9 +83,12 @@ def seed_repo(workdir: str) -> None:
     landed in one is a property of `TMPDIR`: `/mnt/scratch/tmp` sits under a
     checkout, a CI runner's does not. That turned the whole block into drift at
     every machine boundary, which would flap forever between a local refresh
-    and the daily one. Owning the repo fixed those values in place; 2.1.268
-    stamps no repo state at all (MEASURED 2026-09-13), and the seed stays as
-    the determinism mechanism for any version that derives from the repo again.
+    and the daily one. Owning the repo fixed those values in place. 2.1.268
+    dropped the repo state from the system array (MEASURED 2026-09-13); the
+    gitStatus reminder and the session facts ride the request's messages
+    instead (MEASURED 2026-09-23 on 2.1.281), outside what a capture records.
+    The seed stays as the determinism mechanism for any version that derives
+    the system array from the repo again.
 
     The local identity was the same story one level down: the block's
     `Git user:` line appeared only when git resolved one, so a throwaway-repo
@@ -243,7 +246,9 @@ def _run_interactive(
     try:
         time.sleep(BOOT_WAIT)
         with contextlib.suppress(OSError):
-            # the TUI asks whether to use the dummy env api key; Enter accepts
+            # Enter answers the TUI's dummy-key dialog with its default, "No
+            # (recommended)": the session declines the env api key and falls back
+            # to ANTHROPIC_AUTH_TOKEN (MEASURED 2026-09-23 on 2.1.281)
             os.write(fd, b"\r")
             time.sleep(INPUT_WAIT)
             os.write(fd, b"hi\r")
