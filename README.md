@@ -2,7 +2,7 @@
 
 Extracted Claude Code per-model system prompts as reviewable diffs.
 
-Claude Code builds its system prompt on the client, so the prompt a given model receives is observable without touching Anthropic's API. This repo captures that prompt per model, normalizes it, and commits it. A daily job captures every release that landed since the last run, snapshots each one, and opens a PR when anything moved, which turns a silent upstream prompt change into a diff someone can read. The PR description lists each changed prompt with its added/removed line counts and the changed lines themselves. The release list comes from the Claude Code changelog; the binaries come from the official release CDN.
+Claude Code builds its system prompt on the client, so the prompt a given model receives is observable without a single model request leaving the machine. This repo captures that prompt per model, normalizes it, and commits it. A daily job captures every release that landed since the last run, snapshots each one, and opens a PR when anything moved, which turns a silent upstream prompt change into a diff someone can read. The PR description lists each changed prompt with its added/removed line counts and the changed lines themselves. The release list comes from the Claude Code changelog; the binaries come from the official release CDN.
 
 ## What it captures
 
@@ -17,7 +17,9 @@ A `claude -p` run marks the session non-interactive, so capturing the CLI flavor
 
 ## How it works
 
-No upstream API is involved. A stdlib HTTP server binds a loopback port, the CLI is pointed at it through `ANTHROPIC_BASE_URL` with a dummy key, and the server records each request's `system` blocks and answers 400. One rejected request per model is enough.
+No model request leaves the machine. A stdlib HTTP server binds a loopback port, the CLI is pointed at it through `ANTHROPIC_BASE_URL` with a dummy key, and the server records each request's `system` blocks and answers 400. One rejected request per model is enough.
+
+The CLI still makes its own background calls around that request, to Anthropic's and GitHub's endpoints, and runs `gh` to look up the user's recently closed Claude Code issues. The capture turns each spawn's self-updater off, resolves the launcher once per run, and refuses a capture whose own `cc_version` stamp names a release other than the one the run records. It gives `gh` no config, no token and no session bus (its keyring), so `gh` runs logged out.
 
 Each spawn gets a fresh config dir seeded with onboarding plus folder trust, and a temporary working directory, so no project's files or history are loaded as context. That is not the same as a context-free prompt: through 2.1.267, Claude Code walks up from the temp dir looking for a git checkout and stamps a `gitStatus:` block into the prompt when it finds one; 2.1.268 dropped that block from the `system` blocks this capture records, and on 2.1.281 it arrives in the first user message (`messages[0]`) instead.
 
