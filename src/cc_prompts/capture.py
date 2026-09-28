@@ -19,7 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 
 from .meta import record_capture
@@ -268,11 +268,14 @@ def _run_interactive(
     timeout: float = ATTEMPT_TIMEOUT,
     extra_env: dict[str, str] | None = None,
     no_dummy_keys: bool = False,
+    extra_args: Sequence[str] | None = None,
 ) -> None:
     env = _spawn_env(config_dir, base_url, model_id, use_flag, extra_env, no_dummy_keys)
     args = [binary]
     if use_flag:
         args += ["--model", model_id]
+    if extra_args:
+        args += list(extra_args)
 
     pid, fd = pty.fork()
     if pid == 0:
@@ -321,12 +324,15 @@ def _run_sdk(
     timeout: float = ATTEMPT_TIMEOUT,
     extra_env: dict[str, str] | None = None,
     no_dummy_keys: bool = False,
+    extra_args: Sequence[str] | None = None,
 ) -> None:
     del server, ready  # the subprocess exits on its own; the recorder keeps the body
     env = _spawn_env(config_dir, base_url, model_id, use_flag, extra_env, no_dummy_keys)
     cmd = [binary, "-p", "hi"]
     if use_flag:
         cmd += ["--model", model_id]
+    if extra_args:
+        cmd += list(extra_args)
     # a timeout may still have landed the request; the recorder decides success
     with contextlib.suppress(subprocess.TimeoutExpired):
         subprocess.run(

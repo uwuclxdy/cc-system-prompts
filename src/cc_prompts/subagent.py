@@ -50,6 +50,13 @@ PROBE_PROMPT = "cc-prompts subagent probe: reply with the word ok and stop."
 # on which side of the spawn a request came from, so nothing here has to infer it
 SUBAGENT_MARK = "cc_is_subagent=true"
 PROBE_TIMEOUT = 150.0
+# auto mode, the 2.1.283+ default, runs a security classifier on every tool call
+# and refuses the tool when that request fails -- which it always does here, the
+# recorder answers it 400 -- so the Agent tool never executes. manual is the
+# pre-auto-mode behavior the probe was green under, cli pty and sdk `-p` alike
+# (MEASURED 2026-09-29 on 2.1.284); bypassPermissions refuses to start in a
+# throwaway config.
+PROBE_SPAWN_ARGS = ("--permission-mode", "manual")
 
 
 def sse_event(payload: dict) -> str:
@@ -182,6 +189,7 @@ def _run_probe(
             timeout=PROBE_TIMEOUT,
             extra_env=extra_env,
             no_dummy_keys=no_dummy_keys,
+            extra_args=PROBE_SPAWN_ARGS,
         )
         if has_subagent_request(server):
             break

@@ -260,6 +260,7 @@ def test_capture_pair_threads_env_and_dummy_key_choice_to_the_runner(monkeypatch
             "timeout": mod.PROBE_TIMEOUT,
             "extra_env": {"CLAUDE_CODE_ARTIFACT": "1"},
             "no_dummy_keys": True,
+            "extra_args": ("--permission-mode", "manual"),
         }
     ]
 
@@ -354,3 +355,22 @@ def test_main_refuses_no_dummy_keys_without_a_config_dir(monkeypatch, capsys):
         main(["--no-dummy-keys"])
     assert err.value.code == 2
     assert "--config-dir" in capsys.readouterr().err
+
+
+def test_run_probe_spawns_in_manual_mode(monkeypatch):
+    import cc_prompts.subagent as mod
+
+    calls = []
+
+    def fake_runner(binary, model_id, config_dir, workdir, base_url, use_flag, server, **kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(mod, "runner_for", lambda mode: fake_runner)
+    monkeypatch.setattr(mod, "has_subagent_request", lambda server: True)
+
+    mod._run_probe(
+        "claude", "model", "cli", "/tmp/cfg", "/tmp/wd", "http://127.0.0.1:1", None, None, False
+    )
+
+    assert len(calls) == 1
+    assert list(calls[0]["extra_args"]) == ["--permission-mode", "manual"]

@@ -393,3 +393,62 @@ def test_spawn_env_extra_env_survives_no_dummy_keys_when_naming_a_credential_var
     )
     assert env["ANTHROPIC_API_KEY"] == "real"
     assert "ANTHROPIC_AUTH_TOKEN" not in env
+
+
+def test_run_sdk_appends_extra_args_to_the_spawn(tmp_path):
+    from cc_prompts.capture import _run_sdk
+
+    dump = tmp_path / "argv.txt"
+    binary = tmp_path / "fake-claude"
+    binary.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {dump}\n')
+    binary.chmod(0o755)
+
+    _run_sdk(
+        str(binary),
+        "model",
+        str(tmp_path),
+        str(tmp_path),
+        "http://127.0.0.1:1",
+        True,
+        None,
+        timeout=5,
+        extra_args=["--permission-mode", "manual"],
+    )
+
+    assert dump.read_text().splitlines() == [
+        "-p",
+        "hi",
+        "--model",
+        "model",
+        "--permission-mode",
+        "manual",
+    ]
+
+
+def test_run_interactive_appends_extra_args_to_the_spawn(tmp_path):
+    from cc_prompts.capture import _run_interactive
+
+    dump = tmp_path / "argv.txt"
+    binary = tmp_path / "fake-claude"
+    binary.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {dump}\n')
+    binary.chmod(0o755)
+
+    _run_interactive(
+        str(binary),
+        "model",
+        str(tmp_path),
+        str(tmp_path),
+        "http://127.0.0.1:1",
+        True,
+        None,
+        ready=lambda server: True,
+        timeout=1,
+        extra_args=["--permission-mode", "manual"],
+    )
+
+    assert dump.read_text().splitlines() == [
+        "--model",
+        "model",
+        "--permission-mode",
+        "manual",
+    ]
