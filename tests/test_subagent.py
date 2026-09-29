@@ -136,6 +136,8 @@ def _stub_run(monkeypatch, parent: str, sub: str):
     monkeypatch.setattr(mod, "custom_prompt_text", lambda: CUSTOM)
     monkeypatch.setattr(mod, "claude_version", lambda binary: "2.1.241")
     monkeypatch.setattr(mod, "capture_pair", lambda *a, **k: (parent, sub))
+    # a hermetic launcher: the default resolves under $HOME, absent on the runner
+    monkeypatch.setattr(mod, "pin_launcher", lambda binary: binary)
 
 
 def test_main_states_the_verdict_when_the_parent_carried_the_custom_prompt(monkeypatch, capsys):
@@ -276,6 +278,7 @@ def test_main_threads_env_pairs_and_the_dummy_key_choice_to_capture_pair(monkeyp
 
     monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
     monkeypatch.setattr(mod, "capture_pair", fake_capture_pair)
+    monkeypatch.setattr(mod, "pin_launcher", lambda binary: binary)
     assert (
         main(
             [
@@ -337,6 +340,7 @@ def test_main_threads_a_value_containing_equals(monkeypatch):
 
     monkeypatch.setattr(mod, "custom_prompt_text", lambda: "")
     monkeypatch.setattr(mod, "capture_pair", fake_capture_pair)
+    monkeypatch.setattr(mod, "pin_launcher", lambda binary: binary)
     assert main(["--env", "CLAUDE_CODE_ARTIFACT=1=x"]) == 0
     assert calls["extra_env"] == {"CLAUDE_CODE_ARTIFACT": "1=x"}
 
