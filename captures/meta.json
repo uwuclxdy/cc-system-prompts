@@ -1,6 +1,6 @@
 {
-  "version": "2.1.296",
-  "observed": "2026-10-11",
+  "version": "2.1.300",
+  "observed": "2026-10-15",
   "captures": {
     "opus.md": {
       "model": "claude-opus-5"
