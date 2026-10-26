@@ -6,15 +6,15 @@ observe. Answering one request with a forged `Agent` tool_use makes the CLI
 spawn one for real, and that subagent's own request reaches the same recorder.
 
 Two things come out of that one spawn. The subagent prompt itself is stock and
-publishable, so it lands in `captures/` like any other. And driving the SHIM
-instead of the launcher answers whether a session's `--system-prompt-file`
-reaches its subagents: the shim'd parent is the positive control, without which
-a clean subagent is not evidence about inheritance, only about the run.
+publishable, so it lands in `captures/` like any other. And driving a wrapper
+that passes `--system-prompt-file` instead of the launcher answers whether a
+session's `--system-prompt-file` reaches its subagents: the wrapped parent is
+the positive control, without which a clean subagent is not evidence about
+inheritance, only about the run.
 """
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -37,9 +37,6 @@ from .meta import record_capture
 from .normalize import normalize
 from .recorder import RecorderServer, start_recorder, stop_recorder
 
-# the one launcher `capture` refuses, and the only one that gives the
-# inheritance question a parent whose prompt the subagent could have inherited
-SHIM_BIN = os.path.expanduser("~/.local/shims/claude")
 # the spawning tool is `Agent` on the wire as of 2.1.241 and was `Task` before,
 # so the name is read back from the request's own tool list rather than assumed
 AGENT_TOOL_NAMES = ("Agent", "Task")
@@ -269,7 +266,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--claude-bin",
         default=DEFAULT_BIN,
-        help=f"launcher to drive; {SHIM_BIN} gives the inheritance verdict its control",
+        help=(
+            "launcher to drive; a wrapper passing the local custom prompt file to "
+            "--system-prompt-file gives the inheritance verdict its control"
+        ),
     )
     parser.add_argument("--subagent-type", default=PROBE_AGENT_TYPE)
     parser.add_argument(
@@ -347,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
     if in_parent:
         print("the custom prompt does not reach the subagent")
     elif custom and not args.out:
-        # without a shim'd parent there is nothing the subagent could have
+        # without a wrapped parent there is nothing the subagent could have
         # inherited, so a clean subagent is not evidence about inheritance. a
         # run writing a capture was never asking, so it does not hear about it
         print(f"no inheritance control: {args.claude_bin} left the parent prompt stock")

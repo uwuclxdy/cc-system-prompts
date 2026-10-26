@@ -56,8 +56,8 @@ def test_validate_entrypoint_accepts_a_renamed_stamp():
 
 
 def test_validate_stock_rejects_a_capture_carrying_the_custom_prompt():
-    # a shim'd spawn stamps the cli entrypoint like any other interactive one,
-    # so only the body separates a shim'd capture from a stock one
+    # a wrapped spawn stamps the cli entrypoint like any other interactive one,
+    # so only the body separates a wrapped capture from a stock one
     with pytest.raises(RuntimeError, match="custom prompt"):
         validate_stock(f"{CLI_HEADER}You are Claude Code.\n{CUSTOM_LINE}\n", CUSTOM_LINE)
 
@@ -104,15 +104,15 @@ def test_seed_repo_gives_the_workdir_a_local_identity(tmp_path):
     assert shown.stdout.strip() == "capture"
 
 
-def test_capture_model_refuses_to_return_a_shimd_capture(monkeypatch):
-    # pins the wiring, not just the guard: capture_model is where a shim'd body
+def test_capture_model_refuses_to_return_a_wrapped_capture(monkeypatch):
+    # pins the wiring, not just the guard: capture_model is where a wrapped body
     # would otherwise reach write_capture and land in `captures/`
     from cc_prompts import capture as capture_mod
 
-    shimd = f"{SDK_HEADER}You are a Claude agent.\n{CUSTOM_LINE}\n" + "x" * 5000
+    wrapped = f"{SDK_HEADER}You are a Claude agent.\n{CUSTOM_LINE}\n" + "x" * 5000
 
     def fake_run(binary, model_id, config_dir, workdir, base_url, use_flag, server):
-        server.requests.append({"model": model_id, "system": [{"type": "text", "text": shimd}]})
+        server.requests.append({"model": model_id, "system": [{"type": "text", "text": wrapped}]})
 
     monkeypatch.setattr(capture_mod, "_run_sdk", fake_run)
     monkeypatch.setattr(capture_mod, "custom_prompt_text", lambda: CUSTOM_LINE)

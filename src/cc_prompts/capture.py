@@ -35,13 +35,13 @@ MODELS: dict[str, str] = {
 }
 
 DEFAULT_BIN = os.path.expanduser("~/.local/bin/claude")
-# where the custom prompt lives: the path the shim hardcodes, then this checkout
+# where the custom prompt lives: the home-dir copy, then this checkout
 CUSTOM_PROMPT_PATHS = (
     Path(os.path.expanduser("~/.claude/system-prompt/cc-sys.md")),
     Path(__file__).resolve().parents[2] / "cc-sys.md",
 )
-# calibrated against the 10 committed captures plus one deliberate shim'd capture:
-# zero stock false positives at 40 chars and above, 50 of 52 markers hit the shim'd one
+# calibrated against the 10 committed captures plus one deliberate wrapped capture:
+# zero stock false positives at 40 chars and above, 50 of 52 markers hit the wrapped one
 MIN_CUSTOM_MARKER = 60
 ATTEMPT_TIMEOUT = 90
 BOOT_WAIT = 4.0
@@ -156,18 +156,19 @@ def custom_markers(system: str, custom: str) -> list[str]:
 def validate_stock(system: str, custom: str) -> None:
     """Guard the artifact of record: a capture must carry the STOCK prompt.
 
-    A shim'd spawn stamps the cli entrypoint like any other interactive one, so
-    `validate_entrypoint` passes a shim'd capture unchanged. The custom prompt
+    A wrapped spawn stamps the cli entrypoint like any other interactive one, so
+    `validate_entrypoint` passes a wrapped capture unchanged. The custom prompt
     is identity-bearing and `captures/` gets pushed, so match on content: a
-    renamed shim, or a `--claude-bin` pointing anywhere else, still spells its
+    renamed wrapper, or a `--claude-bin` pointing anywhere else, still spells its
     own bytes into the capture. Inert when `custom` is empty, which is the CI
-    case, where no shim exists to guard against.
+    case, where no wrapper exists to guard against.
     """
     found = custom_markers(system, custom)
     if found:
         raise RuntimeError(
             f"capture carries the custom prompt ({found[0][:50]!r}); "
-            "drive the real launcher, not the shim"
+            f"drive the real launcher ({DEFAULT_BIN}), not a wrapper that passes "
+            "--system-prompt-file"
         )
 
 
