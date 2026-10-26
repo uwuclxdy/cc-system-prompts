@@ -25,7 +25,7 @@ Each spawn gets a fresh config dir seeded with onboarding plus folder trust, and
 
 Whether it finds a checkout is a property of the machine, not of the capture, which made that whole block read as drift at every boundary between a laptop and a CI runner. So the temp dir is given its own empty repository, with its own local git identity, and the block's values are then the same on every machine. They are normalized away regardless; the labels are upstream prompt text, and a change to them is exactly what this repo tracks. The seed stays in place for any future version that puts repo-derived content back into the system blocks.
 
-A capture is refused only when it is provably a different artifact than the one asked for: every request carries a billing header in which Claude Code stamps the spawn's own flavor (`cc_entrypoint=cli` for the pty, `sdk-cli` for `-p`), and a stamp naming the other flavor means the runner and the wire disagreed. A missing or renamed stamp cannot discriminate and passes. A prompt whose tracked text moved upstream — a reworded identity line, a dropped block — is a valid capture: it lands as a drift diff, never as a failure.
+The flavor check refuses a capture only when it is provably a different artifact than the one asked for: every request carries a billing header in which Claude Code stamps the spawn's own flavor (`cc_entrypoint=cli` for the pty, `sdk-cli` for `-p`), and a stamp naming the other flavor means the runner and the wire disagreed. A missing or renamed stamp cannot discriminate and passes. A prompt whose tracked text moved upstream — a reworded identity line, a dropped block — is a valid capture: it lands as a drift diff, never as a failure.
 
 So normalization, not isolation, is what makes a capture publishable. Before writing, the tool replaces everything machine-specific: dates, working directory, OS version, model line, knowledge cutoff, session ids, remaining-token lines, memory paths, and — in versions that still send one — the whole `gitStatus:` body (branch names, git identity, working-tree paths, commit subjects). The block's labels survive, because their wording is upstream prompt text and a change to it is exactly what this repo tracks.
 
@@ -41,7 +41,7 @@ The spawning tool is named `Agent` as of 2.1.241 and was `Task` before it, so th
 
 All four Claude models normalize to a byte-identical subagent prompt, so `captures/subagent.md` covers them together. A non-Claude model is told its name differently and gets no knowledge-cutoff line, which `captures/subagent-deepseek.md` records separately.
 
-Pointing the same probe at the shim answers a second question: whether a session's `--system-prompt-file` reaches its subagents. It does not. A shim'd parent carrying 53 lines of custom prompt spawned a subagent carrying none, and that subagent's prompt matched a stock parent's byte for byte.
+Pointing the same probe at a wrapper that passes `--system-prompt-file` (`--claude-bin <wrapper>`) answers a second question: whether a session's custom prompt reaches its subagents. It does not. A wrapped parent carrying 53 lines of custom prompt spawned a subagent carrying none, and that subagent's prompt matched a stock parent's byte for byte.
 
 ## Layout
 
@@ -51,7 +51,6 @@ Pointing the same probe at the shim answers a second question: whether a session
 | `captures/` | current normalized captures, one file per model per flavor, plus the two subagent captures; `meta.json` holds the set's provenance |
 | `archive/<cc-version>/` | one snapshot per release, each with its own `meta.json`; adjacent dirs diff to the prompt change |
 | `scripts/refresh-captures.sh` | capture every release since the last one and archive each; the same script CI runs |
-| `shim/claude` | PATH wrapper that puts a custom system prompt in front of every spawn |
 
 ## Running it
 
@@ -63,13 +62,11 @@ uv run cc-prompts-subagent                 # spawn a subagent, print its prompt'
 ./scripts/refresh-captures.sh              # capture every release since the last committed capture
 ```
 
-`refresh-captures.sh` downloads each release binary from the official CDN, checksum-verified against the release manifest, so nothing on the machine decides which version gets recorded. A manual `cc-prompts-capture` still runs against the real `claude` launcher: pointing it at a wrapper that injects `--system-prompt-file` would record that custom prompt instead of the stock one, so the capture is refused when its text matches the custom prompt's.
+`refresh-captures.sh` downloads each release binary from the official CDN, checksum-verified against the release manifest, so nothing on the machine decides which version gets recorded. A manual `cc-prompts-capture` still runs against the real `claude` launcher: pointing it at a wrapper that injects `--system-prompt-file` would record that custom prompt instead of the stock one, so the capture is refused when it contains any line of 60 characters or more from the local custom prompt file, when one is readable.
 
-## The shim
+## The `--system-prompt-file` flag
 
-`shim/claude` is a PATH wrapper that hands the real launcher a `--system-prompt-file`. That flag replaces only the third entry of the stock system array — the billing header and the identity line survive — and leaves the session-facts message intact in both the pty and the `-p` flavor. A session still knows its working directory, platform, and OS version, because those facts arrive in that message (`messages[1]`, a role `system` message outside the system array) rather than in the entry the flag replaces. In `-p` the flag also drops the stock gitStatus reminder from the first user message; the pty flavor keeps it. The shim passes `~/.claude/system-prompt/cc-sys.md` itself to the flag.
-
-Install it ahead of the real launcher on PATH with `install -m 755 shim/claude ~/.local/shims/claude`. It fails open at every step: a missing or unreadable prompt file, or a caller that already passes a `--system-prompt*` or `--append-system-prompt*` flag of its own, falls back to a plain passthrough.
+`claude --system-prompt-file <file>` replaces only the third entry of the stock system array — the billing header and the identity line survive — and leaves the session-facts message intact in both the pty and the `-p` flavor. A session still knows its working directory, platform, and OS version, because those facts arrive in that message (`messages[1]`, a role `system` message outside the system array) rather than in the entry the flag replaces. In `-p` the flag also drops the stock gitStatus reminder from the first user message; the pty flavor keeps it.
 
 Settings files are not an alternative route. In 2.1.240, `systemPromptFile` as a string, `systemPromptFile` as `{"type": "file", "path": …}`, and `systemPrompt` as the same object all leave the captured prompt byte-identical to the baseline, with no warning; a `model` key in the same file does take effect, which is what proves the file was read at all.
 
