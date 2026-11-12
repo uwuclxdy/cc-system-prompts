@@ -47,9 +47,9 @@ Pointing the same probe at a wrapper that passes `--system-prompt-file` (`--clau
 
 | path | role |
 |---|---|
-| `src/cc_prompts/` | the capture tool: recorder, spawn drivers, normalizer, subagent probe |
+| `src/cc_prompts/` | the capture tool: recorder, spawn drivers, normalizer, subagent probe, binary strings extractor |
 | `captures/` | current normalized captures, one file per model per flavor, plus the two subagent captures; `meta.json` holds the set's provenance |
-| `archive/<cc-version>/` | one snapshot per release, each with its own `meta.json`; adjacent dirs diff to the prompt change |
+| `archive/<cc-version>/` | one snapshot per release, each with its own `meta.json` and a `strings.jsonl` when the release's model-facing strings changed; adjacent dirs diff to the prompt and string change |
 | `scripts/refresh-captures.sh` | capture every release since the last one and archive each; the same script CI runs |
 
 ## Running it
@@ -72,6 +72,6 @@ Settings files are not an alternative route. In 2.1.240, `systemPromptFile` as a
 
 ## Caveats
 
-A capture diff can move for two different reasons: Anthropic changed the prompt, or a release landed. The provenance sidecar and the per-version archive separate them; adjacent archive dirs differ only in `meta.json` when a release changed no prompt bytes.
+A capture diff can move for two different reasons: Anthropic changed the prompt, or a release landed. The provenance sidecar and the per-version archive separate them; adjacent archive dirs differ only in `meta.json` and `strings.jsonl` when a release changed no prompt bytes. The drift PR's strings section shows added, changed and removed counts per rule class with the description and reminder rows inline; the full rows live in the release's `strings.jsonl`.
 
 The prompt text here is Anthropic's, reproduced as observed for change tracking.
