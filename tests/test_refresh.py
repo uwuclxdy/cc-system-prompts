@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from cc_prompts.refresh import MAX_DIFF_CHARS, _render_changes, changed_diffs, refresh
+from fixture_binary import build_binary
 
 
 def make_set(dest: Path, version: str, body: str = "prompt body\n") -> None:
@@ -23,7 +24,11 @@ def make_repo(tmp_path: Path, version: str, body: str = "prompt body\n") -> Path
 
 def stub_install(monkeypatch):
     def fake_install(version, cache_dir, base_url):
-        return Path(f"/stub/{version}")
+        binary = Path(cache_dir) / version
+        if not binary.exists():
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            build_binary(binary)
+        return binary
 
     monkeypatch.setattr("cc_prompts.refresh.install_binary", fake_install)
 

@@ -18,7 +18,7 @@ FETCH_TIMEOUT = 30
 VERSION_RE = re.compile(r"^##\s+(\d+\.\d+\.\d+)\s*$")
 
 
-def _key(version: str) -> tuple[int, ...]:
+def version_key(version: str) -> tuple[int, ...]:
     return tuple(int(part) for part in version.split("."))
 
 
@@ -34,12 +34,12 @@ def parse_versions(text: str) -> list[str]:
             continue
         if match := VERSION_RE.match(line):
             versions.add(match.group(1))
-    return sorted(versions, key=_key)
+    return sorted(versions, key=version_key)
 
 
 def versions_since(text: str, watermark: str) -> list[str]:
     """Versions strictly newer than the watermark, oldest first."""
-    return [v for v in parse_versions(text) if _key(v) > _key(watermark)]
+    return [v for v in parse_versions(text) if version_key(v) > version_key(watermark)]
 
 
 def fetch_changelog(url: str) -> str:
