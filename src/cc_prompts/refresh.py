@@ -41,7 +41,7 @@ STRING_PAIR_RATIO = 0.85
 # archive dirs are release snapshots; the shape check keeps a stray dir from
 # pairing as one
 VERSION_DIR_RE = re.compile(r"^\d+\.\d+\.\d+$")
-# the table shows every class; only description/reminder changes inline
+# the table lists only classes with a nonzero count; only description/reminder changes inline
 INLINE_RULES = ("description", "reminder")
 RULE_CLASSES = ("description", "reminder", "prose", "hook", "array-sibling", "ternary-sibling")
 
